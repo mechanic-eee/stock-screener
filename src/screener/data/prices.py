@@ -20,18 +20,16 @@ log = logging.getLogger(__name__)
 
 
 def _fetch_kr(ticker: str, years: int) -> Optional[pd.DataFrame]:
-    from pykrx import stock
+    # FinanceDataReader returns adjusted prices; no KRX login needed.
+    import FinanceDataReader as fdr
 
-    end = datetime.now()
-    start = end - timedelta(days=years * 365 + 30)
-    raw = stock.get_market_ohlcv_by_date(
-        start.strftime("%Y%m%d"), end.strftime("%Y%m%d"), ticker, adjusted=True
-    )
+    start = (datetime.now() - timedelta(days=years * 365 + 30)).strftime("%Y-%m-%d")
+    raw = fdr.DataReader(ticker, start)
     if raw is None or raw.empty:
         return None
-    raw = raw.rename(columns={"시가": "open", "고가": "high", "저가": "low",
-                              "종가": "close", "거래량": "volume"})
-    raw["adj_close"] = raw["close"]
+    raw = raw.rename(columns={"Open": "open", "High": "high", "Low": "low",
+                              "Close": "close", "Volume": "volume"})
+    raw["adj_close"] = raw["close"]  # FDR Close is already adjusted
     raw.index = pd.to_datetime(raw.index)
     return raw[["open", "high", "low", "close", "adj_close", "volume"]]
 

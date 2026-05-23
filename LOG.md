@@ -11,3 +11,5 @@
 ## [2026-05-23] stock-screener | fix | calibrate make_report 상위폴더 생성, db get_connection 스키마 자동초기화
 ## [2026-05-23] stock-screener | fix | adj_close NaN으로 인한 NOT NULL 위반이 스캔 전체를 죽이던 버그: fetch에서 adj_close←close 보강+빈행 제거, save를 종목별 try로 격리. 200종목 무중단 검증.
 ## [2026-05-23] stock-screener | work | 종목 유형 분류/필터 추가: security_type(common/etf/etn/spac/preferred/warrant_unit/fund) 분류·저장(tickers 컬럼+마이그레이션), build_universe(include_types) 기본=보통주, UI 멀티셀렉트+scan --types. US 분류 검증: 보통주5108/ETF1285/유닛1236/펀드405/SPAC205/우선주130. ADS는 보통주 유지(우선주 오분류 수정).
+## [2026-05-23] stock-screener | fix | 유니버스 캐시가 시장 구분 없이 전역 신선도만 봐서 KR 요청시 빈 목록(0종목) 반환하던 버그 → 시장별 신선도(universe_built_at:<market>)+시장별 저장으로 수정
+## [2026-05-23] stock-screener | fix | pykrx 1.2.8이 KRX 로그인(KRX_ID/PW) 요구해 KR 목록·시세 실패 → KR 데이터소스를 FinanceDataReader로 교체(로그인불요, 수정주가, StockListing+DataReader). KR 보통주 1,448종목 확인.

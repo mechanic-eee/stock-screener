@@ -123,35 +123,26 @@ def list_us() -> list[dict]:
 
 # --------------------------------------------------------------------------- KR
 def list_kr(min_market_cap: float = MIN_MARKET_CAP_KRW) -> list[dict]:
-    from pykrx import stock
+    # FinanceDataReader: no login required (pykrx now needs KRX credentials).
+    import FinanceDataReader as fdr
 
-    date = datetime.now().strftime("%Y%m%d")
-    rows = []
-    for _exchange in ("KOSPI", "KOSDAQ"):
-        for t in stock.get_market_ticker_list(date, market=_exchange):
-            try:
-                rows.append({"ticker": t, "name": stock.get_market_ticker_name(t)})
-            except Exception as e:  # noqa: BLE001
-                log.warning("name fetch failed %s: %s", t, e)
-    df = pd.DataFrame(rows)
-    if df.empty:
+    lst = fdr.StockListing("KRX")
+    lst = lst[lst["Market"].isin(["KOSPI", "KOSDAQ"])].copy()
+    if lst.empty:
         return []
 
-    cap = stock.get_market_cap_by_ticker(date)
-    if "시가총액" in cap.columns:
-        cap = cap.rename(columns={"시가총액": "market_cap"})
-        df = df.merge(cap[["market_cap"]], left_on="ticker", right_index=True, how="left")
-    else:
-        df["market_cap"] = None
-
+    df = pd.DataFrame({
+        "ticker": lst["Code"].astype(str),
+        "name": lst["Name"].fillna("").astype(str),
+        "market_cap": lst["Marcap"] if "Marcap" in lst.columns else None,
+    })
     df["security_type"] = [_classify_kr(n) for n in df["name"]]
     df["is_excluded"] = 0
     df["exclude_reason"] = None
-    # quality exclusion only (type is handled separately); apply cap to common stock
-    if "market_cap" in df.columns:
-        small = (df["market_cap"].fillna(0) < min_market_cap) & (df["security_type"] == "common")
-        df.loc[small, "is_excluded"] = 1
-        df.loc[small, "exclude_reason"] = "below_market_cap"
+    # quality exclusion only (type handled separately); cap applies to common stock
+    small = (df["market_cap"].fillna(0) < min_market_cap) & (df["security_type"] == "common")
+    df.loc[small, "is_excluded"] = 1
+    df.loc[small, "exclude_reason"] = "below_market_cap"
 
     df["market"] = "KR"
     df["sector"] = None
@@ -175,18 +166,15 @@ def build_universe(
                 and r.get("security_type", "common") in types
                 and not r.get("is_excluded"))
 
-    if use_cache:
-        cached = cache.load_universe()
-        if cached is not None:
-            return [r for r in cached if _keep(r)]
+    # build any requested market that is missing or stale in the cache
+    for m in markets:
+        if not use_cache or not cache.market_fresh(m):
+            log.info("building %s universe...", m)
+            rows = list_kr() if m == "KR" else list_us()
+            cache.save_market_universe(m, rows)
 
-    rows: list[dict] = []
-    if "KR" in markets:
-        rows += list_kr()
-    if "US" in markets:
-        rows += list_us()
-    cache.save_universe(rows)
-    return [r for r in rows if _keep(r)]
+    cached = cache.load_universe() or []
+    return [r for r in cached if _keep(r)]
 
 
 def type_counts(markets: list[str]) -> dict:

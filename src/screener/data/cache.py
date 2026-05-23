@@ -85,12 +85,20 @@ def _f(v):
     return float(v) if v is not None and pd.notna(v) else None
 
 
-def load_universe(max_age_days: float = 7.0) -> Optional[list[dict]]:
+def market_fresh(market: str, max_age_days: float = 7.0) -> bool:
+    """Whether this market's universe was built recently (per-market clock)."""
     conn = db.get_connection()
     try:
-        built = db.get_ops_meta(conn, "universe_built_at")
-        if not built or _stale(built, max_age_days):
-            return None
+        v = db.get_ops_meta(conn, f"universe_built_at:{market}")
+    finally:
+        conn.close()
+    return bool(v) and not _stale(v, max_age_days)
+
+
+def load_universe() -> Optional[list[dict]]:
+    """All cached ticker rows (freshness is tracked per-market elsewhere)."""
+    conn = db.get_connection()
+    try:
         rows = conn.execute(
             "SELECT ticker, market, name, security_type, is_excluded, exclude_reason FROM tickers"
         ).fetchall()
@@ -105,10 +113,12 @@ def load_universe(max_age_days: float = 7.0) -> Optional[list[dict]]:
     ]
 
 
-def save_universe(rows: list[dict]) -> None:
+def save_market_universe(market: str, rows: list[dict]) -> None:
+    """Replace one market's tickers and stamp its per-market build time."""
     db.init_db()
     conn = db.get_connection()
     try:
+        conn.execute("DELETE FROM tickers WHERE market=?", (market,))
         recs = [(
             r["ticker"], r["market"], r.get("name") or r["ticker"],
             r.get("sector"), r.get("market_cap"), r.get("security_type", "common"),
@@ -123,6 +133,6 @@ def save_universe(rows: list[dict]) -> None:
         )
         conn.execute("DELETE FROM tickers WHERE ticker IS NULL OR ticker=''")
         conn.commit()
-        db.upsert_ops_meta(conn, "universe_built_at", db.now_iso())
+        db.upsert_ops_meta(conn, f"universe_built_at:{market}", db.now_iso())
     finally:
         conn.close()

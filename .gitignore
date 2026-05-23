@@ -19,3 +19,6 @@ exports/
 # os / editor
 .DS_Store
 .streamlit/secrets.toml
+
+# transient scan logs
+*.log
