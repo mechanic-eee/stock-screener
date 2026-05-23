@@ -17,3 +17,6 @@
 ## [2026-05-23] stock-screener | work | [클라우드 배포] 풀클라우드 스캐폴딩: snapshot.py(후보 parquet), scripts/daily_scan.py, 앱 호스팅모드(스냅샷)+비번게이트, GitHub Actions 일일워크플로우(→data 브랜치), DEPLOY.md. 스냅샷 왕복·AppTest·전스크립트 파싱 검증. gh 미설치라 repo push는 사용자 작업.
 ## [2026-05-23] stock-screener | handoff | GitHub repo 생성·배포(mechanic-eee/stock-screener, main), gh CLI 설치, Actions 첫 KR 실행 성공(24분)→data 브랜치 스냅샷, Streamlit Cloud 연결 완료(사용자). raw URL 로드 검증.
 ## [2026-05-23] stock-screener | work | 스케줄 스캔 설정 변경: 평일만(cron 0 22 * * 1-5), KR+US, 전 종목유형(ETF/ETN 등 포함), 임계 -50%. daily_scan에 --types 추가. -50%에서 KR 보통주 564종목 확인.
+## [2026-05-23] stock-screener | work | 시장·종목유형 표시 필터 추가(스냅샷 모드에서도 선택), security_type을 TickerData→스냅샷까지 전달. 사이드바 순서 재배치(데이터소스→표시필터→보조지표).
+## [2026-05-23] stock-screener | fix | 호스팅 AttributeError(옛 session_state TickerData에 security_type 없음) → getattr 방어. Streamlit Cloud use_container_width 폐기경고 → width='stretch'.
+## [2026-05-23] stock-screener | work | 뉴스 필터 API(NewsAPI) 사용법·한계 정리(무료=로컬전용·영어·100req/일·캐시없음). 실사용화는 다음으로 연기(PLAN 백로그). 세션 정리·저장.
