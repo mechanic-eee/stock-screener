@@ -9,3 +9,4 @@
 ## [2026-05-23] stock-screener | work | [통합②] 점수모델: scoring.py 곡선 + FilterOutcome.score + 가중합성점수/순위 + UI 가중치. 검증: AAPG -56%+MACD당일 85.2점 최상위, -97% 상폐위험 40점
 ## [2026-05-23] stock-screener | work | [통합③] calibrate_gates.py 이관+export_prices.py, 합성데이터 13변형 OFAT 검증
 ## [2026-05-23] stock-screener | fix | calibrate make_report 상위폴더 생성, db get_connection 스키마 자동초기화
+## [2026-05-23] stock-screener | fix | adj_close NaN으로 인한 NOT NULL 위반이 스캔 전체를 죽이던 버그: fetch에서 adj_close←close 보강+빈행 제거, save를 종목별 try로 격리. 200종목 무중단 검증.

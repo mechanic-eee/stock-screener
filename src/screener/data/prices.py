@@ -87,7 +87,16 @@ def get_prices(
         time.sleep(sleep_between)
     if df is None or df.empty:
         return None
-    cache.save_prices(market, ticker, df)
+    # adj_close is NOT NULL in the DB: fill from close, then drop rows still empty
+    df = df.copy()
+    df["adj_close"] = df["adj_close"].fillna(df["close"])
+    df = df.dropna(subset=["adj_close"])
+    if df.empty:
+        return None
+    try:
+        cache.save_prices(market, ticker, df)
+    except Exception as e:  # noqa: BLE001 — one bad ticker must not kill the scan
+        log.warning("cache save failed %s/%s: %s", market, ticker, e)
     # return in canonical screening shape (close := adj_close)
     out = df.copy()
     out["close"] = out["adj_close"]

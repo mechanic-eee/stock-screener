@@ -55,11 +55,16 @@ def save_prices(market: str, ticker: str, df: pd.DataFrame) -> None:
     try:
         recs = []
         for idx, r in df.iterrows():
+            adj = _f(r.get("adj_close"))
+            if adj is None:
+                adj = _f(r.get("close"))
+            if adj is None:
+                continue  # adj_close is NOT NULL; skip unusable rows
             vol = r.get("volume")
             recs.append((
                 ticker, pd.Timestamp(idx).strftime("%Y-%m-%d"),
                 _f(r.get("open")), _f(r.get("high")), _f(r.get("low")),
-                _f(r.get("close")), _f(r.get("adj_close")),
+                _f(r.get("close")), adj,
                 int(vol) if pd.notna(vol) else None,
             ))
         conn.executemany(
