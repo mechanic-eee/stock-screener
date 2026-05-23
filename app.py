@@ -107,6 +107,12 @@ weights[base.key] = st.sidebar.slider(
     help="합성 점수에서 이 요소의 상대 비중 (활성 요소들로 정규화됨).",
 )
 
+def _stype(c):
+    # getattr fallback: tolerate older cached candidates without security_type
+    return getattr(c, "security_type", "common")
+
+
+# ---- Sidebar: data source (+ load action, run before the display filter) ----
 st.sidebar.header("데이터 소스")
 SNAP_URL = _secret("SNAPSHOT_URL", "")  # raw GitHub URL on the hosted app
 snap_available = bool(SNAP_URL) or snapshot.DEFAULT_PATH.exists()
@@ -117,11 +123,8 @@ source = st.sidebar.radio(
     help="스냅샷: 매일 자동 스캔된 후보를 즉시 로드. 라이브: 지금 시세를 받아 스캔(로컬·느림).",
 )
 live_mode = source.startswith("라이브")
-
-markets = ["KR", "US"]
-include_types = ["common"]
-limit = 0
 years = base_params.get("years", 5)
+
 if live_mode:
     markets = st.sidebar.multiselect("시장", ["KR", "US"], default=["KR", "US"])
     type_labels = st.sidebar.multiselect(
@@ -132,8 +135,55 @@ if live_mode:
     include_types = [_label_to_type[lbl] for lbl in type_labels] or ["common"]
     limit = st.sidebar.number_input("스캔 종목 수 제한 (0=전체)", 0, 10000, 200, step=50,
                                     help="처음엔 작게. 전체 스캔은 오래 걸립니다.")
+    if st.sidebar.button("🔄 라이브 스캔", type="primary"):
+        if not markets:
+            st.sidebar.error("시장을 하나 이상 선택하세요.")
+        else:
+            prog = st.sidebar.progress(0.0, text="시작…")
 
-# ---- Sidebar: optional filters ----
+            def cb(i, total, ticker):
+                prog.progress(i / total, text=f"{i}/{total}  {ticker}")
+
+            cands = engine.build_candidates(
+                markets, base_params=base_params, years=int(years),
+                limit=(int(limit) or None), progress_cb=cb, include_types=include_types,
+            )
+            prog.empty()
+            st.session_state["candidates"] = cands
+            st.session_state["scan_meta"] = {"src": "라이브", "n": len(cands)}
+else:
+    smeta = snapshot.snapshot_meta(SNAP_URL or None)
+    if smeta.get("tickers"):
+        st.sidebar.caption(f"스냅샷 {smeta['tickers']}종목 · 최종 {smeta.get('last_date','?')} · "
+                           f"{'+'.join(smeta.get('markets', []))}")
+    if st.sidebar.button("📥 최신 스냅샷 불러오기", type="primary") or (
+        st.session_state.get("candidates") is None and snap_available
+    ):
+        with st.spinner("스냅샷 로드 중…"):
+            loaded = snapshot.load_candidates(SNAP_URL or None)
+        st.session_state["candidates"] = loaded
+        st.session_state["scan_meta"] = {"src": "스냅샷", "n": len(loaded)}
+
+cands = st.session_state.get("candidates")
+
+# ---- Sidebar: display filters (between data source and indicator filters) ----
+shown: list = []
+if cands:
+    st.sidebar.header("표시 필터 (시장·유형)")
+    present_markets = sorted({c.market for c in cands})
+    present_types = [t for t in SECURITY_TYPES if any(_stype(c) == t for c in cands)]
+    sel_markets = st.sidebar.multiselect("시장", present_markets, default=present_markets,
+                                         key="disp.markets")
+    _l2t = {v: k for k, v in TYPE_LABELS.items()}
+    sel_type_labels = st.sidebar.multiselect(
+        "종목 유형", [TYPE_LABELS[t] for t in present_types],
+        default=[TYPE_LABELS[t] for t in present_types], key="disp.types",
+    )
+    sel_types = {_l2t[lbl] for lbl in sel_type_labels}
+    shown = [c for c in cands
+             if c.market in set(sel_markets) and _stype(c) in sel_types]
+
+# ---- Sidebar: optional indicator filters ----
 st.sidebar.header("보조지표 필터")
 selected: dict[str, dict] = {}
 for flt in optional_filters():
@@ -155,39 +205,6 @@ if any(get(k).needs_news for k in selected) and not news_ready:
 st.title("📉 5년 고가 대비 폭락주 스크리너")
 st.caption("기본: 종가 기준 N년 최고가 대비 하락률 ≥ 임계. 보조지표는 사이드바에서 켜고 값 조정.")
 
-if live_mode:
-    if st.button("🔄 라이브 스캔 (시세 수집·기본 필터)", type="primary"):
-        if not markets:
-            st.error("시장을 하나 이상 선택하세요.")
-        else:
-            prog = st.progress(0.0, text="시작…")
-
-            def cb(i, total, ticker):
-                prog.progress(i / total, text=f"{i}/{total}  {ticker}")
-
-            with st.spinner("시세 수집 + 기본 필터 적용 중…"):
-                cands = engine.build_candidates(
-                    markets, base_params=base_params, years=int(years),
-                    limit=(int(limit) or None), progress_cb=cb,
-                    include_types=include_types,
-                )
-            prog.empty()
-            st.session_state["candidates"] = cands
-            st.session_state["scan_meta"] = {"src": "라이브", "n": len(cands)}
-else:
-    meta = snapshot.snapshot_meta(SNAP_URL or None)
-    if meta.get("tickers"):
-        st.caption(f"스냅샷: {meta['tickers']}종목 · 최종 {meta.get('last_date','?')} · "
-                   f"{'+'.join(meta.get('markets', []))}")
-    if st.button("📥 최신 스냅샷 불러오기", type="primary") or (
-        st.session_state.get("candidates") is None and snap_available
-    ):
-        with st.spinner("스냅샷 로드 중…"):
-            cands = snapshot.load_candidates(SNAP_URL or None)
-        st.session_state["candidates"] = cands
-        st.session_state["scan_meta"] = {"src": "스냅샷", "n": len(cands)}
-
-cands = st.session_state.get("candidates")
 if not cands:
     if live_mode:
         st.info("좌측에서 시장·기준을 정하고 **라이브 스캔**을 누르세요.")
@@ -195,26 +212,8 @@ if not cands:
         st.info("매일 자동 스캔된 **스냅샷**을 불러오세요. 보조지표·가중치는 즉시 반영됩니다.")
 else:
     meta = st.session_state.get("scan_meta", {})
-    st.success(f"후보 {meta.get('n', len(cands))}종목 ({meta.get('src','?')}) · 보조지표를 켜면 즉시 좁혀집니다.")
-
-    # ---- display filters: pick market & security type from the loaded set ----
-    st.sidebar.header("표시 필터 (시장·유형)")
-    # getattr fallback: tolerate older cached candidates without security_type
-    def _stype(c):
-        return getattr(c, "security_type", "common")
-
-    present_markets = sorted({c.market for c in cands})
-    present_types = [t for t in SECURITY_TYPES if any(_stype(c) == t for c in cands)]
-    sel_markets = st.sidebar.multiselect("시장", present_markets, default=present_markets, key="disp.markets")
-    _l2t = {v: k for k, v in TYPE_LABELS.items()}
-    sel_type_labels = st.sidebar.multiselect(
-        "종목 유형", [TYPE_LABELS[t] for t in present_types],
-        default=[TYPE_LABELS[t] for t in present_types], key="disp.types",
-    )
-    sel_types = {_l2t[lbl] for lbl in sel_type_labels}
-    shown = [c for c in cands
-             if c.market in set(sel_markets) and _stype(c) in sel_types]
-
+    st.success(f"후보 {meta.get('n', len(cands))}종목 ({meta.get('src','?')}) · "
+               f"표시 필터·보조지표로 즉시 좁혀집니다.")
     rows = engine.apply_filters(shown, base_params=base_params, selected=selected, weights=weights)
     st.subheader(f"결과: {len(rows)}종목 (점수순) · 후보 {len(shown)}/{len(cands)}")
     if rows:
