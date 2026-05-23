@@ -23,6 +23,16 @@ try:
 except Exception:
     pass
 
+# Streamlit Cloud exposes secrets via st.secrets, not as environment variables.
+# Bridge scalar secrets into os.environ so modules that read os.getenv
+# (DART_API_KEY, NEWSAPI_KEY, telegram tokens, ...) see them on the hosted app.
+try:
+    for _k, _v in st.secrets.items():
+        if isinstance(_v, str) and _k not in os.environ:
+            os.environ[_k] = _v
+except Exception:
+    pass
+
 from screener import engine, snapshot  # noqa: E402
 from screener.data.universe import SECURITY_TYPES, TYPE_LABELS  # noqa: E402
 from screener.filters.base import base_filters, get, optional_filters  # noqa: E402
