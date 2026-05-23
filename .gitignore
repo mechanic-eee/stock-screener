@@ -23,3 +23,5 @@ exports/
 
 # transient scan logs
 *.log
+
+top20.txt
