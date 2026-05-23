@@ -10,7 +10,7 @@
 - [x] 데이터 계층 (pykrx·yfinance + pickle 캐시)
 - [x] 뉴스 필터 (provider 추상화 + 감성, 키 없으면 비활성)
 - [x] 엔진 + Streamlit 앱 + CLI(scan.py)
-- [ ] venv 설치 + 스모크 테스트 (Python 3.14 호환성 확인)
+- [x] venv 설치 + 스모크 테스트 — Python 3.14에서 전 의존성 설치 OK, 합성+실데이터(yfinance) end-to-end 검증 완료
 - [ ] 미국 전종목 universe CSV 채우기 (현재 시드 15개)
 - [ ] 감성 스코어러 모델 교체 검토 (KR-FinBERT 등)
 - [ ] 결과를 stock-investing 워치리스트로 보내는 연결(수동/CSV)
