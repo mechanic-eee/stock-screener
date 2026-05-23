@@ -24,6 +24,7 @@ except Exception:
     pass
 
 from screener import engine  # noqa: E402
+from screener.data.universe import SECURITY_TYPES, TYPE_LABELS  # noqa: E402
 from screener.filters.base import base_filters, get, optional_filters  # noqa: E402
 from screener.models import Param  # noqa: E402
 
@@ -74,6 +75,12 @@ weights[base.key] = st.sidebar.slider(
 
 st.sidebar.header("유니버스")
 markets = st.sidebar.multiselect("시장", ["KR", "US"], default=["KR", "US"])
+type_labels = st.sidebar.multiselect(
+    "종목 유형", [TYPE_LABELS[t] for t in SECURITY_TYPES], default=[TYPE_LABELS["common"]],
+    help="스캔에 포함할 증권 유형. 기본은 보통주만. ETF/ETN 등은 필요할 때만 추가하세요.",
+)
+_label_to_type = {v: k for k, v in TYPE_LABELS.items()}
+include_types = [_label_to_type[lbl] for lbl in type_labels] or ["common"]
 limit = st.sidebar.number_input("스캔 종목 수 제한 (0=전체)", 0, 10000, 200, step=50,
                                 help="처음엔 작게 두고 동작 확인 후 늘리세요. 전체 스캔은 오래 걸립니다.")
 years = base_params.get("years", 5)
@@ -115,6 +122,7 @@ with col1:
                 cands = engine.build_candidates(
                     markets, base_params=base_params, years=int(years),
                     limit=(int(limit) or None), progress_cb=cb,
+                    include_types=include_types,
                 )
             prog.empty()
             st.session_state["candidates"] = cands

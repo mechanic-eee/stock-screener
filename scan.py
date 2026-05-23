@@ -25,6 +25,9 @@ from screener.filters.base import optional_filters  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser(description="Drawdown stock screener (CLI).")
     ap.add_argument("--markets", nargs="+", default=["US"], choices=["KR", "US"])
+    ap.add_argument("--types", nargs="+", default=["common"],
+                    choices=["common", "etf", "etn", "spac", "preferred", "warrant_unit", "fund"],
+                    help="security types to include (default: common only)")
     ap.add_argument("--years", type=int, default=5)
     ap.add_argument("--min-drop", type=int, default=80, help="min %% drop from N-year high")
     ap.add_argument("--limit", type=int, default=20, help="cap tickers scanned (0=all)")
@@ -32,14 +35,15 @@ def main() -> int:
     args = ap.parse_args()
 
     base_params = {"years": args.years, "min_drop_pct": args.min_drop}
-    print(f"universe={args.markets} limit={args.limit} base: -{args.min_drop}% / {args.years}y")
+    print(f"universe={args.markets} types={args.types} limit={args.limit} "
+          f"base: -{args.min_drop}% / {args.years}y")
 
     def cb(i, total, ticker):
         print(f"\r  {i}/{total} {ticker:<12}", end="", flush=True)
 
     cands = engine.build_candidates(
         args.markets, base_params=base_params, years=args.years,
-        limit=(args.limit or None), progress_cb=cb,
+        limit=(args.limit or None), progress_cb=cb, include_types=args.types,
     )
     print(f"\nbase-screen survivors: {len(cands)}")
 

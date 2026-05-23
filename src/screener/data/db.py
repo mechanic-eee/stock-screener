@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS tickers (
   name TEXT NOT NULL,
   sector TEXT,
   market_cap REAL,
+  security_type TEXT DEFAULT 'common',
   is_excluded INTEGER DEFAULT 0,
   exclude_reason TEXT,
   updated_at TEXT
@@ -93,9 +94,18 @@ def init_db(db_path: str | Path = DEFAULT_DB) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the first schema (CREATE IF NOT EXISTS
+    won't alter an existing table)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(tickers)")}
+    if "security_type" not in cols:
+        conn.execute("ALTER TABLE tickers ADD COLUMN security_type TEXT DEFAULT 'common'")
 
 
 _initialized: set[str] = set()

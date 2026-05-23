@@ -13,6 +13,8 @@
 - [x] **[통합②]** 점수 모델: FilterOutcome에 score(0~100), PRD 점수곡선(scoring.py), 가중 합성점수+순위, UI 가중치 슬라이더
 - [x] **[통합③]** 캘리브레이션 백테스트 이관(backtest/) + SQLite→parquet 추출기, 합성데이터 검증
 - [x] **[통합]** 텔레그램 알림 이관, PRD/방법론 문서 docs/로 이관
+- [x] **종목 유형 분류/필터**: security_type(보통주/ETF/ETN/SPAC/우선주/워런트유닛/펀드) 분류·저장 + 스캔 시 포함유형 선택(기본=보통주). UI 멀티셀렉트 + CLI --types.
+- [ ] 종목유형 분류 정밀도 개선: US ETN은 NASDAQ 심볼파일로 거의 탐지 불가(대부분 common/fund로 빠짐), "Trust" 포함 보통주 일부 fund 오분류 가능 → 데이터소스 보강 검토
 - [ ] 감성 스코어러 모델 교체 검토 (KR-FinBERT 등)
 - [ ] PRD 미구현분 통합 후보: 펀더멘털 자동제외(DART/yfinance) · LLM 뉴스분류 · 주봉MACD · 카탈리스트(실적일정) · 쿨다운
 - [ ] 결과를 stock-investing 워치리스트로 보내는 연결(수동/CSV)

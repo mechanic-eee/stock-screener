@@ -92,15 +92,16 @@ def load_universe(max_age_days: float = 7.0) -> Optional[list[dict]]:
         if not built or _stale(built, max_age_days):
             return None
         rows = conn.execute(
-            "SELECT ticker, market, name, is_excluded, exclude_reason FROM tickers"
+            "SELECT ticker, market, name, security_type, is_excluded, exclude_reason FROM tickers"
         ).fetchall()
     finally:
         conn.close()
     if not rows:
         return None
     return [
-        {"ticker": t, "market": m, "name": n, "is_excluded": x, "exclude_reason": r}
-        for (t, m, n, x, r) in rows
+        {"ticker": t, "market": m, "name": n, "security_type": st,
+         "is_excluded": x, "exclude_reason": r}
+        for (t, m, n, st, x, r) in rows
     ]
 
 
@@ -110,16 +111,17 @@ def save_universe(rows: list[dict]) -> None:
     try:
         recs = [(
             r["ticker"], r["market"], r.get("name") or r["ticker"],
-            r.get("sector"), r.get("market_cap"),
+            r.get("sector"), r.get("market_cap"), r.get("security_type", "common"),
             int(r.get("is_excluded", 0) or 0), r.get("exclude_reason"),
             db.now_iso(),
         ) for r in rows]
         conn.executemany(
             "INSERT OR REPLACE INTO tickers"
-            "(ticker,market,name,sector,market_cap,is_excluded,exclude_reason,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "(ticker,market,name,sector,market_cap,security_type,is_excluded,exclude_reason,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             recs,
         )
+        conn.execute("DELETE FROM tickers WHERE ticker IS NULL OR ticker=''")
         conn.commit()
         db.upsert_ops_meta(conn, "universe_built_at", db.now_iso())
     finally:

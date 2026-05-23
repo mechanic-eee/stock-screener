@@ -1,19 +1,21 @@
-"""Build the KR + US ticker universe.
+"""Build the KR + US ticker universe, classified by security type.
 
-Ported from the predecessor project:
-- US: NASDAQ Trader official symbol directory (NASDAQ + NYSE) with ETF / SPAC /
-  preferred / warrant exclusion heuristics.
-- KR: pykrx live KOSPI + KOSDAQ list with market-cap floor and preferred / SPAC
-  / ETF exclusion.
+Ported/extended from the predecessor project:
+- US: NASDAQ Trader official symbol directory (NASDAQ + NYSE).
+- KR: pykrx live KOSPI + KOSDAQ list with market-cap floor.
 
-Rows are normalized to our canonical shape:
-    {ticker, market("KR"|"US"), name, sector, market_cap, is_excluded, exclude_reason}
-`build_universe(markets)` caches into SQLite and returns only ACTIVE
-(is_excluded == 0) rows for the requested market groups.
+Every ticker is classified into `security_type` (not hard-excluded), so the
+caller can choose which types to scan (default: common stock only). Quality
+exclusion (`is_excluded`, e.g. below market cap) is kept separate from type.
+
+Canonical row:
+    {ticker, market("KR"|"US"), name, sector, market_cap, security_type,
+     is_excluded, exclude_reason}
 """
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from io import StringIO
 
@@ -28,7 +30,49 @@ NASDAQ_LIST_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
 OTHER_LIST_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
 
 MIN_MARKET_CAP_KRW = 100_000_000_000  # ₩100B
-MIN_MARKET_CAP_USD = 500_000_000      # $500M (applied lazily during price fetch)
+
+# selectable types
+SECURITY_TYPES = ["common", "etf", "etn", "spac", "preferred", "warrant_unit", "fund"]
+TYPE_LABELS = {
+    "common": "보통주", "etf": "ETF", "etn": "ETN", "spac": "스팩(SPAC)",
+    "preferred": "우선주", "warrant_unit": "워런트/유닛/권리", "fund": "펀드/신탁",
+}
+
+
+# --------------------------------------------------------------------- classify
+def _classify_us(name: str, etf_flag: str, ticker: str) -> str:
+    n = name or ""
+    if etf_flag == "Y":
+        return "etf"
+    if re.search(r"\bETN\b|Exchange[- ]Traded Note", n, re.I):
+        return "etn"
+    if re.search(r"\bETF\b", n, re.I):
+        return "etf"
+    # instrument type (units/warrants/rights) takes priority over issuer type
+    if re.search(r"\bWarrants?\b|\bUnits?\b|\bRights?\b", n, re.I) or re.search(r"[.\^$=]", ticker):
+        return "warrant_unit"
+    if re.search(r"\bAcquisition\b|\bSPAC\b|Blank Check", n, re.I):
+        return "spac"
+    # only "Preferred" marks preferred — ADS ("Depositary Shares ... common shares")
+    # are common equity and must NOT be caught here
+    if re.search(r"Preferred|\bPref\.?\b", n, re.I):
+        return "preferred"
+    if re.search(r"\bTrust\b|\bFund\b|\bIndex\b", n, re.I):
+        return "fund"
+    return "common"
+
+
+def _classify_kr(name: str) -> str:
+    n = name or ""
+    if "ETN" in n:
+        return "etn"
+    if re.search(r"ETF|KODEX|TIGER|KOSEF|ARIRANG|KBSTAR|KINDEX|SOL |ACE |PLUS ", n):
+        return "etf"
+    if "스팩" in n:
+        return "spac"
+    if re.search(r"우\s*$|우[ABC]\s*$|\(우\)", n):
+        return "preferred"
+    return "common"
 
 
 # --------------------------------------------------------------------------- US
@@ -60,26 +104,20 @@ def list_us() -> list[dict]:
         ignore_index=True,
     ).drop_duplicates(subset=["ticker"]).reset_index(drop=True)
 
-    df["is_excluded"] = 0
-    df["exclude_reason"] = None
+    df = df[df["ticker"].notna()].copy()
+    df["ticker"] = df["ticker"].astype(str)
+    df["name"] = df["name"].fillna("").astype(str)
+    df["etf_flag"] = df["etf_flag"].fillna("N").astype(str)
 
-    def _exclude(mask, reason):
-        m = mask & (df["is_excluded"] == 0)
-        df.loc[m, "is_excluded"] = 1
-        df.loc[m, "exclude_reason"] = reason
-
-    _exclude(df["etf_flag"] == "Y", "etf")
-    _exclude(df["name"].str.contains(
-        r"\bETF\b|\bTrust\b|\bFund\b|\bIndex\b|\bAcquisition Corp\b",
-        case=False, regex=True, na=False), "fund_or_spac")
-    _exclude(df["ticker"].str.contains(r"\.|\^|\$|=", regex=True, na=False), "non_common_share")
-    _exclude(df["name"].str.contains(r"Preferred|Pref\.", case=False, regex=True, na=False),
-             "preferred_share")
-
+    df["security_type"] = [
+        _classify_us(n, f, t) for n, f, t in zip(df["name"], df["etf_flag"], df["ticker"])
+    ]
     df["market"] = "US"
     df["sector"] = None
     df["market_cap"] = None
-    return df[["ticker", "market", "name", "sector", "market_cap",
+    df["is_excluded"] = 0
+    df["exclude_reason"] = None
+    return df[["ticker", "market", "name", "sector", "market_cap", "security_type",
                "is_excluded", "exclude_reason"]].to_dict("records")
 
 
@@ -106,35 +144,41 @@ def list_kr(min_market_cap: float = MIN_MARKET_CAP_KRW) -> list[dict]:
     else:
         df["market_cap"] = None
 
+    df["security_type"] = [_classify_kr(n) for n in df["name"]]
     df["is_excluded"] = 0
     df["exclude_reason"] = None
-
-    def _exclude(mask, reason):
-        m = mask & (df["is_excluded"] == 0)
-        df.loc[m, "is_excluded"] = 1
-        df.loc[m, "exclude_reason"] = reason
-
-    _exclude(df["name"].str.contains(r"우\s*$|우[ABC]\s*$|\(우\)", regex=True, na=False),
-             "preferred_share")
-    _exclude(df["name"].str.contains("스팩", na=False), "spac")
-    _exclude(df["name"].str.contains(r"ETF|ETN|KODEX|TIGER|KOSEF|ARIRANG", regex=True, na=False),
-             "etf_etn")
+    # quality exclusion only (type is handled separately); apply cap to common stock
     if "market_cap" in df.columns:
-        _exclude(df["market_cap"].fillna(0) < min_market_cap, "below_market_cap")
+        small = (df["market_cap"].fillna(0) < min_market_cap) & (df["security_type"] == "common")
+        df.loc[small, "is_excluded"] = 1
+        df.loc[small, "exclude_reason"] = "below_market_cap"
 
     df["market"] = "KR"
     df["sector"] = None
-    return df[["ticker", "market", "name", "sector", "market_cap",
+    return df[["ticker", "market", "name", "sector", "market_cap", "security_type",
                "is_excluded", "exclude_reason"]].to_dict("records")
 
 
 # ----------------------------------------------------------------------- public
-def build_universe(markets: list[str], use_cache: bool = True) -> list[dict]:
-    """Return ACTIVE (non-excluded) tickers for the requested groups, caching all."""
+def build_universe(
+    markets: list[str],
+    include_types: list[str] | tuple[str, ...] = ("common",),
+    use_cache: bool = True,
+) -> list[dict]:
+    """Return tickers for the requested market groups, filtered by security
+    type (default: common only) and excluding quality-failed rows."""
+    types = set(include_types)
+
+    def _keep(r: dict) -> bool:
+        return (bool(r.get("ticker"))
+                and r["market"] in markets
+                and r.get("security_type", "common") in types
+                and not r.get("is_excluded"))
+
     if use_cache:
         cached = cache.load_universe()
         if cached is not None:
-            return [r for r in cached if r["market"] in markets and not r.get("is_excluded")]
+            return [r for r in cached if _keep(r)]
 
     rows: list[dict] = []
     if "KR" in markets:
@@ -142,4 +186,16 @@ def build_universe(markets: list[str], use_cache: bool = True) -> list[dict]:
     if "US" in markets:
         rows += list_us()
     cache.save_universe(rows)
-    return [r for r in rows if not r.get("is_excluded")]
+    return [r for r in rows if _keep(r)]
+
+
+def type_counts(markets: list[str]) -> dict:
+    """Cached per-type counts for display (None if no cache yet)."""
+    cached = cache.load_universe()
+    if cached is None:
+        return {}
+    out: dict[str, int] = {}
+    for r in cached:
+        if r["market"] in markets and not r.get("is_excluded"):
+            out[r.get("security_type", "common")] = out.get(r.get("security_type", "common"), 0) + 1
+    return out

@@ -32,8 +32,9 @@ def build_candidates(
     max_age_days: float = 1.0,
     limit: Optional[int] = None,
     progress_cb: ProgressCb = None,
+    include_types: list[str] | tuple[str, ...] = ("common",),
 ) -> list[TickerData]:
-    rows = universe_mod.build_universe(markets)
+    rows = universe_mod.build_universe(markets, include_types=include_types)
     if limit:
         rows = rows[:limit]
     base = base_filters()[0]  # the drawdown screen
