@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# secrets
+.env
+
+# cached market data (rebuildable)
+data/prices/
+data/universe.json
+
+# os / editor
+.DS_Store
+.streamlit/secrets.toml
