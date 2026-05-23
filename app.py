@@ -199,8 +199,12 @@ else:
 
     # ---- display filters: pick market & security type from the loaded set ----
     st.sidebar.header("표시 필터 (시장·유형)")
+    # getattr fallback: tolerate older cached candidates without security_type
+    def _stype(c):
+        return getattr(c, "security_type", "common")
+
     present_markets = sorted({c.market for c in cands})
-    present_types = [t for t in SECURITY_TYPES if any(c.security_type == t for c in cands)]
+    present_types = [t for t in SECURITY_TYPES if any(_stype(c) == t for c in cands)]
     sel_markets = st.sidebar.multiselect("시장", present_markets, default=present_markets, key="disp.markets")
     _l2t = {v: k for k, v in TYPE_LABELS.items()}
     sel_type_labels = st.sidebar.multiselect(
@@ -209,7 +213,7 @@ else:
     )
     sel_types = {_l2t[lbl] for lbl in sel_type_labels}
     shown = [c for c in cands
-             if c.market in set(sel_markets) and c.security_type in sel_types]
+             if c.market in set(sel_markets) and _stype(c) in sel_types]
 
     rows = engine.apply_filters(shown, base_params=base_params, selected=selected, weights=weights)
     st.subheader(f"결과: {len(rows)}종목 (점수순) · 후보 {len(shown)}/{len(cands)}")
