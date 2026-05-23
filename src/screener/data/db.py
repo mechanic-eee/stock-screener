@@ -1,0 +1,129 @@
+"""SQLite schema + connection management.
+
+Ported/adapted from the predecessor project's PRD §7.1 schema. Tables are
+created idempotently. We keep the full schema (signals/news/fundamentals/...)
+forward-compatible for later enrichment work, but the current pipeline only
+populates `tickers`, `prices`, and `price_fetch_log`.
+"""
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+# project root = .../stock-screener  (this file: src/screener/data/db.py)
+ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_DB = ROOT / "data" / "screener.db"
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS tickers (
+  ticker TEXT PRIMARY KEY,
+  market TEXT NOT NULL,
+  name TEXT NOT NULL,
+  sector TEXT,
+  market_cap REAL,
+  is_excluded INTEGER DEFAULT 0,
+  exclude_reason TEXT,
+  updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS prices (
+  ticker TEXT NOT NULL,
+  date TEXT NOT NULL,
+  open REAL,
+  high REAL,
+  low REAL,
+  close REAL,
+  adj_close REAL NOT NULL,
+  volume INTEGER,
+  PRIMARY KEY (ticker, date)
+);
+CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices(ticker, date);
+
+-- our addition: per-ticker price freshness tracking for cache invalidation
+CREATE TABLE IF NOT EXISTS price_fetch_log (
+  ticker TEXT PRIMARY KEY,
+  fetched_at TEXT NOT NULL,
+  rows INTEGER
+);
+
+-- forward-compatible enrichment tables (unused by current pipeline)
+CREATE TABLE IF NOT EXISTS signals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticker TEXT NOT NULL,
+  signal_date TEXT NOT NULL,
+  drawdown_pct REAL,
+  macd_signal_type TEXT,
+  macd_signal_age_days INTEGER,
+  volume_ratio REAL,
+  spike_flag INTEGER DEFAULT 0,
+  score_drawdown REAL,
+  score_macd_freshness REAL,
+  score_volume_intensity REAL,
+  score_news_sentiment REAL,
+  score_fundamental REAL,
+  score_mtf REAL,
+  catalyst_bonus REAL DEFAULT 0,
+  total_score REAL,
+  details_json TEXT,
+  created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS alert_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticker TEXT NOT NULL,
+  alert_date TEXT NOT NULL,
+  total_score REAL,
+  signal_id INTEGER,
+  created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_alert_ticker_date ON alert_history(ticker, alert_date);
+
+CREATE TABLE IF NOT EXISTS ops_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at TEXT
+);
+"""
+
+
+def init_db(db_path: str | Path = DEFAULT_DB) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(SCHEMA)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_initialized: set[str] = set()
+
+
+def get_connection(db_path: str | Path = DEFAULT_DB) -> sqlite3.Connection:
+    key = str(db_path)
+    if key not in _initialized:
+        init_db(db_path)  # idempotent; ensures schema exists once per process
+        _initialized.add(key)
+    conn = sqlite3.connect(key)
+    conn.execute("PRAGMA journal_mode = WAL")
+    return conn
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def upsert_ops_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        """INSERT INTO ops_meta(key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+        (key, value, now_iso()),
+    )
+    conn.commit()
+
+
+def get_ops_meta(conn: sqlite3.Connection, key: str) -> Optional[str]:
+    row = conn.execute("SELECT value FROM ops_meta WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None

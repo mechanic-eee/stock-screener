@@ -4,6 +4,7 @@ A spike in volume on a beaten-down name often marks accumulation / a turn.
 """
 from __future__ import annotations
 
+from .. import scoring
 from ..models import Filter, FilterOutcome, Param, TickerData
 from .base import register
 
@@ -19,10 +20,12 @@ def _apply(data: TickerData, p: dict) -> FilterOutcome:
     if long_avg <= 0:
         return FilterOutcome(passed=False, detail="—")
     ratio = short_avg / long_avg
+    flag = " ⚠️" if ratio >= 10 else ""
     return FilterOutcome(
         passed=ratio >= p["min_ratio"],
-        detail=f"거래량 {ratio:.1f}x",
+        detail=f"거래량 {ratio:.1f}x{flag}",
         value=float(ratio),
+        score=scoring.volume_score(ratio),
     )
 
 
@@ -30,7 +33,8 @@ register(
     Filter(
         key="volume_surge",
         label="거래량 급증",
-        description="최근 단기 평균 거래량이 장기 평균 대비 배수 이상으로 늘어난 종목.",
+        description="최근 단기 평균 거래량이 장기 평균 대비 배수 이상으로 늘어난 종목. 3~5x에서 최고점수, 10x↑는 이상치 플래그.",
+        weight=0.10,
         params=[
             Param("short_window", "단기 평균(일)", "int", default=5, min=2, max=30, step=1),
             Param("long_window", "장기 평균(일)", "int", default=60, min=20, max=250, step=5),

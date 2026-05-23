@@ -1,61 +1,121 @@
-"""Local on-disk cache for price history and the candidate universe.
+"""SQLite-backed store for price history and the ticker universe.
 
-Uses pandas pickle (no pyarrow dependency, which avoids wheel gaps on very new
-Python versions). Cache lives under ``data/`` (gitignored). Freshness is by
-file mtime: data older than ``max_age_days`` is treated as stale.
+Replaces the earlier per-ticker pickle cache. The public functions keep the
+same signatures (load_prices/save_prices/load_universe/save_universe) so the
+engine and app are unchanged. Screening uses adjusted close: `load_prices`
+returns a frame whose `close` column IS the adjusted close.
 """
 from __future__ import annotations
 
 import datetime as dt
-import json
-from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
-# project root = .../stock-screener  (this file: src/screener/data/cache.py)
-ROOT = Path(__file__).resolve().parents[3]
-PRICE_DIR = ROOT / "data" / "prices"
-META_PATH = ROOT / "data" / "universe.json"
+from . import db
 
 
-def _price_path(market: str, ticker: str) -> Path:
-    safe = ticker.replace("/", "_")
-    return PRICE_DIR / market / f"{safe}.pkl"
-
-
-def is_fresh(path: Path, max_age_days: float) -> bool:
-    if not path.exists():
-        return False
-    age = dt.datetime.now() - dt.datetime.fromtimestamp(path.stat().st_mtime)
-    return age <= dt.timedelta(days=max_age_days)
+def _stale(fetched_at: str, max_age_days: float) -> bool:
+    try:
+        fetched = dt.datetime.fromisoformat(fetched_at)
+    except ValueError:
+        return True
+    if fetched.tzinfo is None:
+        fetched = fetched.replace(tzinfo=dt.timezone.utc)
+    return (dt.datetime.now(dt.timezone.utc) - fetched) > dt.timedelta(days=max_age_days)
 
 
 def load_prices(market: str, ticker: str, max_age_days: float = 1.0) -> Optional[pd.DataFrame]:
-    path = _price_path(market, ticker)
-    if not is_fresh(path, max_age_days):
-        return None
+    conn = db.get_connection()
     try:
-        return pd.read_pickle(path)
-    except Exception:
+        row = conn.execute(
+            "SELECT fetched_at FROM price_fetch_log WHERE ticker=?", (ticker,)
+        ).fetchone()
+        if not row or _stale(row[0], max_age_days):
+            return None
+        df = pd.read_sql_query(
+            "SELECT date, open, high, low, close, adj_close, volume "
+            "FROM prices WHERE ticker=? ORDER BY date",
+            conn, params=(ticker,),
+        )
+    finally:
+        conn.close()
+    if df.empty:
         return None
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
+    df["close"] = df["adj_close"]  # screen on adjusted close
+    return df[["open", "high", "low", "close", "volume"]]
 
 
 def save_prices(market: str, ticker: str, df: pd.DataFrame) -> None:
-    path = _price_path(market, ticker)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_pickle(path)
+    """`df` is indexed by date with columns open/high/low/close/adj_close/volume."""
+    db.init_db()
+    conn = db.get_connection()
+    try:
+        recs = []
+        for idx, r in df.iterrows():
+            vol = r.get("volume")
+            recs.append((
+                ticker, pd.Timestamp(idx).strftime("%Y-%m-%d"),
+                _f(r.get("open")), _f(r.get("high")), _f(r.get("low")),
+                _f(r.get("close")), _f(r.get("adj_close")),
+                int(vol) if pd.notna(vol) else None,
+            ))
+        conn.executemany(
+            "INSERT OR REPLACE INTO prices"
+            "(ticker,date,open,high,low,close,adj_close,volume) VALUES (?,?,?,?,?,?,?,?)",
+            recs,
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO price_fetch_log(ticker,fetched_at,rows) VALUES (?,?,?)",
+            (ticker, db.now_iso(), len(df)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _f(v):
+    return float(v) if v is not None and pd.notna(v) else None
 
 
 def load_universe(max_age_days: float = 7.0) -> Optional[list[dict]]:
-    if not is_fresh(META_PATH, max_age_days):
-        return None
+    conn = db.get_connection()
     try:
-        return json.loads(META_PATH.read_text(encoding="utf-8"))
-    except Exception:
+        built = db.get_ops_meta(conn, "universe_built_at")
+        if not built or _stale(built, max_age_days):
+            return None
+        rows = conn.execute(
+            "SELECT ticker, market, name, is_excluded, exclude_reason FROM tickers"
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
         return None
+    return [
+        {"ticker": t, "market": m, "name": n, "is_excluded": x, "exclude_reason": r}
+        for (t, m, n, x, r) in rows
+    ]
 
 
 def save_universe(rows: list[dict]) -> None:
-    META_PATH.parent.mkdir(parents=True, exist_ok=True)
-    META_PATH.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    db.init_db()
+    conn = db.get_connection()
+    try:
+        recs = [(
+            r["ticker"], r["market"], r.get("name") or r["ticker"],
+            r.get("sector"), r.get("market_cap"),
+            int(r.get("is_excluded", 0) or 0), r.get("exclude_reason"),
+            db.now_iso(),
+        ) for r in rows]
+        conn.executemany(
+            "INSERT OR REPLACE INTO tickers"
+            "(ticker,market,name,sector,market_cap,is_excluded,exclude_reason,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            recs,
+        )
+        conn.commit()
+        db.upsert_ops_meta(conn, "universe_built_at", db.now_iso())
+    finally:
+        conn.close()

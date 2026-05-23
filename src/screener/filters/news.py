@@ -14,12 +14,16 @@ from .base import register
 def _apply(data: TickerData, p: dict) -> FilterOutcome:
     bundle = data.news
     if bundle is None:
-        return FilterOutcome(passed=False, detail="뉴스없음")
+        return FilterOutcome(passed=False, detail="뉴스없음", score=0.0)
     enough = bundle.recent_count >= p["min_recent_articles"]
     positive = bundle.avg_sentiment >= p["min_sentiment"]
     ok = enough and positive
+    # map avg sentiment (-1..1) -> 0..100; halve when too few recent articles
+    score = (bundle.avg_sentiment + 1) / 2 * 100
+    if not enough:
+        score *= 0.5
     detail = f"기사{bundle.recent_count} 감성{bundle.avg_sentiment:+.2f}"
-    return FilterOutcome(passed=ok, detail=detail, value=bundle.avg_sentiment)
+    return FilterOutcome(passed=ok, detail=detail, value=bundle.avg_sentiment, score=score)
 
 
 register(
@@ -28,6 +32,7 @@ register(
         label="긍정 뉴스 증가",
         description="최근 기간 기사 수가 일정 이상이면서 평균 감성이 양(+)인 종목. (NEWSAPI_KEY 필요)",
         needs_news=True,
+        weight=0.30,
         params=[
             Param("lookback_days", "조회 기간(일)", "int", default=30, min=7, max=90, step=1),
             Param("recent_days", "최근 집계 창(일)", "int", default=7, min=1, max=30, step=1),

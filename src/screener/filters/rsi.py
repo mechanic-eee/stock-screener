@@ -1,7 +1,7 @@
 """RSI below a threshold (oversold) — or above, via the direction param."""
 from __future__ import annotations
 
-from .. import indicators
+from .. import indicators, scoring
 from ..models import Filter, FilterOutcome, Param, TickerData
 from .base import register
 
@@ -14,18 +14,20 @@ def _apply(data: TickerData, p: dict) -> FilterOutcome:
     if r != r:  # NaN
         return FilterOutcome(passed=False, detail="—")
     thr = p["threshold"]
-    if p["direction"] == "이하(과매도)":
-        ok = r <= thr
-    else:
-        ok = r >= thr
-    return FilterOutcome(passed=bool(ok), detail=f"RSI {r:.0f}", value=float(r))
+    oversold = p["direction"] == "이하(과매도)"
+    ok = r <= thr if oversold else r >= thr
+    return FilterOutcome(
+        passed=bool(ok), detail=f"RSI {r:.0f}", value=float(r),
+        score=scoring.rsi_score(float(r), float(thr), oversold),
+    )
 
 
 register(
     Filter(
         key="rsi",
         label="RSI 임계",
-        description="RSI가 지정 임계값 이하(과매도) 또는 이상인 종목.",
+        description="RSI가 지정 임계값 이하(과매도) 또는 이상인 종목. 과매도일수록 고점수.",
+        weight=0.10,
         params=[
             Param("period", "기간", "int", default=14, min=2, max=50, step=1),
             Param("threshold", "임계값", "int", default=35, min=5, max=95, step=1),

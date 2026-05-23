@@ -48,12 +48,12 @@ def main() -> int:
         selected["macd_cross"] = next(f for f in optional_filters() if f.key == "macd_cross").defaults()
 
     rows = engine.apply_filters(cands, base_params=base_params, selected=selected)
-    print(f"after optional filters: {len(rows)}\n")
+    print(f"after optional filters: {len(rows)} (sorted by score)\n")
     for r in rows[:50]:
         extras = " ".join(f"{k}={v}" for k, v in r.items()
-                          if k not in {"ticker", "name", "market", "close", "하락률"})
+                          if k not in {"ticker", "name", "market", "close", "하락률", "점수"})
         print(f"  [{r['market']}] {r['ticker']:<10} {r['name'][:18]:<18} "
-              f"close={r['close']:.2f}  {extras}")
+              f"score={r.get('점수', 0):>5}  close={r['close']:<8}  {extras}")
     return 0
 
 

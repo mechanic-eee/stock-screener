@@ -56,18 +56,25 @@ def apply_filters(
     base_params: dict | None,
     selected: dict[str, dict],
     fetch_news: bool = True,
+    weights: dict[str, float] | None = None,
 ) -> list[dict]:
     """selected maps optional-filter-key -> its param dict.
 
-    Returns one result row per surviving ticker with each active filter's
-    detail string, ready for a table.
+    Returns one result row per surviving ticker, including each active filter's
+    detail string and a weighted composite `점수` (0-100). `weights` overrides
+    per-filter weights (key -> weight); base + active filters all contribute,
+    normalized by total weight so the score stays 0-100 for any selection.
     """
     base = base_filters()[0]
-    # split selected into cheap (technical) and expensive (news) filters
     news_keys = [k for k in selected if get(k).needs_news]
     tech_keys = [k for k in selected if not get(k).needs_news]
 
     provider = news_pkg.get_provider() if (news_keys and fetch_news) else None
+
+    def w(key: str) -> float:
+        if weights and key in weights:
+            return weights[key]
+        return get(key).weight
 
     results: list[dict] = []
     for data in candidates:
@@ -76,10 +83,13 @@ def apply_filters(
             "ticker": data.ticker,
             "name": data.name,
             "market": data.market,
-            "close": float(data.prices["close"].iloc[-1]),
+            "close": round(float(data.prices["close"].iloc[-1]), 2),
             "하락률": base_out.value,
             base.label: base_out.detail,
         }
+        wsum = w(base.key)
+        sscore = w(base.key) * base_out.score
+
         passed = True
         for key in tech_keys:
             flt = get(key)
@@ -88,6 +98,8 @@ def apply_filters(
             if not out.passed:
                 passed = False
                 break
+            wsum += w(key)
+            sscore += w(key) * out.score
         if not passed:
             continue
 
@@ -107,10 +119,15 @@ def apply_filters(
             if not out.passed:
                 passed = False
                 break
-        if passed:
-            results.append(row)
+            wsum += w(key)
+            sscore += w(key) * out.score
+        if not passed:
+            continue
 
-    results.sort(key=lambda r: (r.get("하락률") or 0), reverse=True)
+        row["점수"] = round(sscore / wsum, 1) if wsum else 0.0
+        results.append(row)
+
+    results.sort(key=lambda r: r.get("점수", 0), reverse=True)
     return results
 
 

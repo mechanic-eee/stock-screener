@@ -27,14 +27,16 @@ class TickerData:
 class FilterOutcome:
     """Result of applying one filter to one ticker.
 
-    `passed` drives whether the ticker survives. `detail` is a short string
-    shown in the results table (e.g. "MACD↑", "-82%", "RSI 28").
-    `value` is the raw numeric for sorting/inspection when available.
+    `passed` drives whether the ticker survives (gate role). `score` is the
+    0-100 contribution to the composite score (scorer role) — the predecessor
+    project's "gate AND scorer" idea. `detail` is a short table string;
+    `value` is the raw numeric for sorting/inspection.
     """
 
     passed: bool
     detail: str = ""
     value: Optional[float] = None
+    score: float = 0.0
 
 
 @dataclass
@@ -66,6 +68,8 @@ class Filter:
     needs_news: bool = False
     # If True this is the always-on base screen and cannot be toggled off.
     is_base: bool = False
+    # Default weight in the composite score (relative; normalized at runtime).
+    weight: float = 0.10
 
     def defaults(self) -> dict:
         return {p.key: p.default for p in self.params}

@@ -9,8 +9,12 @@ venv/
 .env
 
 # cached market data (rebuildable)
+data/screener.db
+data/screener.db-wal
+data/screener.db-shm
 data/prices/
 data/universe.json
+exports/
 
 # os / editor
 .DS_Store

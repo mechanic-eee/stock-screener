@@ -66,6 +66,12 @@ base_params = {}
 for p in base.params:
     base_params[p.key] = render_param(p, "base")
 
+weights: dict[str, float] = {}
+weights[base.key] = st.sidebar.slider(
+    f"가중치 · {base.label}", 0.0, 1.0, float(base.weight), step=0.05, key="w.base",
+    help="합성 점수에서 이 요소의 상대 비중 (활성 요소들로 정규화됨).",
+)
+
 st.sidebar.header("유니버스")
 markets = st.sidebar.multiselect("시장", ["KR", "US"], default=["KR", "US"])
 limit = st.sidebar.number_input("스캔 종목 수 제한 (0=전체)", 0, 10000, 200, step=50,
@@ -80,6 +86,10 @@ for flt in optional_filters():
     if on:
         with st.sidebar.expander(f"⚙️ {flt.label} 설정", expanded=True):
             params = {p.key: render_param(p, flt.key) for p in flt.params}
+            weights[flt.key] = st.slider(
+                f"가중치 · {flt.label}", 0.0, 1.0, float(flt.weight),
+                step=0.05, key=f"w.{flt.key}",
+            )
         selected[flt.key] = params
 
 news_ready = bool(os.getenv("NEWSAPI_KEY", "").strip())
@@ -116,10 +126,12 @@ if cands is None:
 else:
     meta = st.session_state.get("scan_meta", {})
     st.success(f"기본 필터 통과 후보: {meta.get('n', len(cands))}종목  ·  보조지표를 켜면 즉시 좁혀집니다.")
-    rows = engine.apply_filters(cands, base_params=base_params, selected=selected)
-    st.subheader(f"결과: {len(rows)}종목")
+    rows = engine.apply_filters(cands, base_params=base_params, selected=selected, weights=weights)
+    st.subheader(f"결과: {len(rows)}종목 (점수순)")
     if rows:
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        front = ["ticker", "name", "market", "점수", "close", "하락률"]
+        cols = front + [c for c in rows[0].keys() if c not in front]
+        st.dataframe(rows, use_container_width=True, hide_index=True, column_order=cols)
         st.download_button(
             "결과 CSV 다운로드",
             data=_to_csv(rows),
