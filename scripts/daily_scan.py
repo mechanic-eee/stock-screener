@@ -23,20 +23,24 @@ except Exception:
     pass
 
 from screener import engine, snapshot  # noqa: E402
+from screener.data.universe import SECURITY_TYPES  # noqa: E402
 from screener.notify.telegram import send_message  # noqa: E402
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--markets", nargs="+", default=["KR", "US"], choices=["KR", "US"])
-    ap.add_argument("--min-drop", type=int, default=80)
+    ap.add_argument("--types", nargs="+", default=list(SECURITY_TYPES), choices=SECURITY_TYPES,
+                    help="security types to include (default: all)")
+    ap.add_argument("--min-drop", type=int, default=50)
     ap.add_argument("--years", type=int, default=5)
     ap.add_argument("--top", type=int, default=15, help="how many to include in the Telegram alert")
     ap.add_argument("--out", default=str(snapshot.DEFAULT_PATH))
     args = ap.parse_args()
 
     base = {"years": args.years, "min_drop_pct": args.min_drop}
-    print(f"daily scan: markets={args.markets} base=-{args.min_drop}%/{args.years}y", flush=True)
+    print(f"daily scan: markets={args.markets} types={args.types} "
+          f"base=-{args.min_drop}%/{args.years}y", flush=True)
 
     def cb(i, total, ticker):
         if i % 200 == 0 or i == total:
@@ -44,7 +48,7 @@ def main() -> int:
 
     cands = engine.build_candidates(
         args.markets, base_params=base, years=args.years,
-        include_types=["common"], progress_cb=cb,
+        include_types=args.types, progress_cb=cb,
     )
     print(f"base survivors: {len(cands)}", flush=True)
 

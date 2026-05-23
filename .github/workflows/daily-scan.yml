@@ -2,16 +2,20 @@ name: Daily scan
 
 on:
   schedule:
-    # 22:00 UTC ≈ after US market close; captures KR + US prior-day closes.
-    - cron: "0 22 * * *"
+    # 22:00 UTC Mon-Fri ≈ after each weekday's US close; captures KR + US.
+    # (Weekdays only — no trading on weekends.)
+    - cron: "0 22 * * 1-5"
   workflow_dispatch:
     inputs:
       markets:
         description: "Markets to scan (space-separated: KR US)"
         default: "KR US"
+      types:
+        description: "Security types (space-separated)"
+        default: "common etf etn spac preferred warrant_unit fund"
       min_drop:
         description: "Min %% drop from 5y high"
-        default: "80"
+        default: "50"
 
 permissions:
   contents: write
@@ -54,7 +58,8 @@ jobs:
         run: |
           python scripts/daily_scan.py \
             --markets ${{ github.event.inputs.markets || 'KR US' }} \
-            --min-drop ${{ github.event.inputs.min_drop || '80' }}
+            --types ${{ github.event.inputs.types || 'common etf etn spac preferred warrant_unit fund' }} \
+            --min-drop ${{ github.event.inputs.min_drop || '50' }}
 
       - name: Publish snapshot to data branch
         run: |
