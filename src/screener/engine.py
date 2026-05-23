@@ -46,7 +46,8 @@ def build_candidates(
         df = prices_mod.get_prices(row["market"], row["ticker"], years=years, max_age_days=max_age_days)
         if df is None or df.empty:
             continue
-        data = TickerData(ticker=row["ticker"], market=row["market"], name=row["name"], prices=df)
+        data = TickerData(ticker=row["ticker"], market=row["market"], name=row["name"],
+                          prices=df, security_type=row.get("security_type", "common"))
         if base.apply(data, base_params).passed:
             candidates.append(data)
     return candidates

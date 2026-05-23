@@ -20,6 +20,7 @@ class TickerData:
     market: str  # "KR" | "US"
     name: str
     prices: pd.DataFrame
+    security_type: str = "common"
     news: Optional["NewsBundle"] = None
 
 

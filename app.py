@@ -196,8 +196,23 @@ if not cands:
 else:
     meta = st.session_state.get("scan_meta", {})
     st.success(f"후보 {meta.get('n', len(cands))}종목 ({meta.get('src','?')}) · 보조지표를 켜면 즉시 좁혀집니다.")
-    rows = engine.apply_filters(cands, base_params=base_params, selected=selected, weights=weights)
-    st.subheader(f"결과: {len(rows)}종목 (점수순)")
+
+    # ---- display filters: pick market & security type from the loaded set ----
+    st.sidebar.header("표시 필터 (시장·유형)")
+    present_markets = sorted({c.market for c in cands})
+    present_types = [t for t in SECURITY_TYPES if any(c.security_type == t for c in cands)]
+    sel_markets = st.sidebar.multiselect("시장", present_markets, default=present_markets, key="disp.markets")
+    _l2t = {v: k for k, v in TYPE_LABELS.items()}
+    sel_type_labels = st.sidebar.multiselect(
+        "종목 유형", [TYPE_LABELS[t] for t in present_types],
+        default=[TYPE_LABELS[t] for t in present_types], key="disp.types",
+    )
+    sel_types = {_l2t[lbl] for lbl in sel_type_labels}
+    shown = [c for c in cands
+             if c.market in set(sel_markets) and c.security_type in sel_types]
+
+    rows = engine.apply_filters(shown, base_params=base_params, selected=selected, weights=weights)
+    st.subheader(f"결과: {len(rows)}종목 (점수순) · 후보 {len(shown)}/{len(cands)}")
     if rows:
         front = ["ticker", "name", "market", "점수", "close", "하락률"]
         cols = front + [c for c in rows[0].keys() if c not in front]

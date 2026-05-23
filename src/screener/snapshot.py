@@ -32,9 +32,10 @@ def export_candidates(candidates: list[TickerData], path: str | Path = DEFAULT_P
         df["ticker"] = c.ticker
         df["market"] = c.market
         df["name"] = c.name
+        df["security_type"] = c.security_type
         frames.append(df)
     if not frames:
-        out = pd.DataFrame(columns=["ticker", "market", "name", "date",
+        out = pd.DataFrame(columns=["ticker", "market", "name", "security_type", "date",
                                     "open", "high", "low", "close", "volume"])
     else:
         out = pd.concat(frames, ignore_index=True)
@@ -49,6 +50,7 @@ def _frame_to_candidates(df: pd.DataFrame) -> list[TickerData]:
         return []
     df["date"] = pd.to_datetime(df["date"])
     cands: list[TickerData] = []
+    has_type = "security_type" in df.columns
     for ticker, g in df.groupby("ticker", sort=False):
         g = g.sort_values("date").set_index("date")
         prices = g[["open", "high", "low", "close", "volume"]].copy()
@@ -57,6 +59,7 @@ def _frame_to_candidates(df: pd.DataFrame) -> list[TickerData]:
             market=str(g["market"].iloc[0]),
             name=str(g["name"].iloc[0]),
             prices=prices,
+            security_type=str(g["security_type"].iloc[0]) if has_type else "common",
         ))
     return cands
 
