@@ -14,6 +14,7 @@ data/screener.db-wal
 data/screener.db-shm
 data/prices/
 data/universe.json
+data/candidates.parquet
 exports/
 
 # os / editor

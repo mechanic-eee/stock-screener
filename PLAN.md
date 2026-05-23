@@ -18,7 +18,9 @@
 - [ ] 감성 스코어러 모델 교체 검토 (KR-FinBERT 등)
 - [ ] PRD 미구현분 통합 후보: 펀더멘털 자동제외(DART/yfinance) · LLM 뉴스분류 · 주봉MACD · 카탈리스트(실적일정) · 쿨다운
 - [ ] 결과를 stock-investing 워치리스트로 보내는 연결(수동/CSV)
-- [ ] 전종목 야간 배치 캐시 워밍(현재 스캔 시 온디맨드 수집)
+- [x] **[클라우드 배포 준비]** 풀 클라우드 구조 스캐폴딩 완료: snapshot.py(후보 parquet export/load), scripts/daily_scan.py(스케줄 스캔+텔레그램), 앱 호스팅모드(스냅샷 로드)+비번 게이트, .github/workflows/daily-scan.yml(일일 cron→data 브랜치 force-push), DEPLOY.md
+- [ ] **[사용자 작업]** GitHub repo 생성+push → Actions 첫 실행 → Streamlit Cloud 연결(Python 3.12, SNAPSHOT_URL/APP_PASSWORD secret). DEPLOY.md 참고
+- [ ] 전종목 일일 스캔 런타임/비용 튜닝(public repo 권장; private면 KR/US 격일 등)
 
 ## 결정 로그
 - (2026-05-23) 인터페이스=Streamlit, 유니버스=KR+US 동시, 뉴스=처음부터. (사용자 선택)

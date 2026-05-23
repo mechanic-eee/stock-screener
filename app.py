@@ -23,12 +23,46 @@ try:
 except Exception:
     pass
 
-from screener import engine  # noqa: E402
+from screener import engine, snapshot  # noqa: E402
 from screener.data.universe import SECURITY_TYPES, TYPE_LABELS  # noqa: E402
 from screener.filters.base import base_filters, get, optional_filters  # noqa: E402
 from screener.models import Param  # noqa: E402
 
 st.set_page_config(page_title="폭락주 스크리너", layout="wide")
+
+
+def _secret(key: str, default: str = "") -> str:
+    """Read from st.secrets, falling back to env, then default."""
+    try:
+        if key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+    return os.getenv(key, default)
+
+
+def _check_password() -> bool:
+    """Gate the app behind a password if APP_PASSWORD secret is set.
+
+    No secret -> open (local dev). Returns True when access is granted.
+    """
+    pw = _secret("APP_PASSWORD", "")
+    if not pw:
+        return True
+    if st.session_state.get("_authed"):
+        return True
+    st.title("🔒 폭락주 스크리너")
+    entered = st.text_input("비밀번호", type="password")
+    if entered:
+        if entered == pw:
+            st.session_state["_authed"] = True
+            st.rerun()
+        else:
+            st.error("비밀번호가 틀렸습니다.")
+    st.stop()
+
+
+_check_password()
 
 
 def _to_csv(rows: list[dict]) -> str:
@@ -73,17 +107,31 @@ weights[base.key] = st.sidebar.slider(
     help="합성 점수에서 이 요소의 상대 비중 (활성 요소들로 정규화됨).",
 )
 
-st.sidebar.header("유니버스")
-markets = st.sidebar.multiselect("시장", ["KR", "US"], default=["KR", "US"])
-type_labels = st.sidebar.multiselect(
-    "종목 유형", [TYPE_LABELS[t] for t in SECURITY_TYPES], default=[TYPE_LABELS["common"]],
-    help="스캔에 포함할 증권 유형. 기본은 보통주만. ETF/ETN 등은 필요할 때만 추가하세요.",
+st.sidebar.header("데이터 소스")
+SNAP_URL = _secret("SNAPSHOT_URL", "")  # raw GitHub URL on the hosted app
+snap_available = bool(SNAP_URL) or snapshot.DEFAULT_PATH.exists()
+source = st.sidebar.radio(
+    "후보 가져오기",
+    ["최신 스냅샷 (빠름)", "라이브 스캔 (로컬)"],
+    index=0 if snap_available else 1,
+    help="스냅샷: 매일 자동 스캔된 후보를 즉시 로드. 라이브: 지금 시세를 받아 스캔(로컬·느림).",
 )
-_label_to_type = {v: k for k, v in TYPE_LABELS.items()}
-include_types = [_label_to_type[lbl] for lbl in type_labels] or ["common"]
-limit = st.sidebar.number_input("스캔 종목 수 제한 (0=전체)", 0, 10000, 200, step=50,
-                                help="처음엔 작게 두고 동작 확인 후 늘리세요. 전체 스캔은 오래 걸립니다.")
+live_mode = source.startswith("라이브")
+
+markets = ["KR", "US"]
+include_types = ["common"]
+limit = 0
 years = base_params.get("years", 5)
+if live_mode:
+    markets = st.sidebar.multiselect("시장", ["KR", "US"], default=["KR", "US"])
+    type_labels = st.sidebar.multiselect(
+        "종목 유형", [TYPE_LABELS[t] for t in SECURITY_TYPES], default=[TYPE_LABELS["common"]],
+        help="스캔에 포함할 증권 유형. 기본은 보통주만.",
+    )
+    _label_to_type = {v: k for k, v in TYPE_LABELS.items()}
+    include_types = [_label_to_type[lbl] for lbl in type_labels] or ["common"]
+    limit = st.sidebar.number_input("스캔 종목 수 제한 (0=전체)", 0, 10000, 200, step=50,
+                                    help="처음엔 작게. 전체 스캔은 오래 걸립니다.")
 
 # ---- Sidebar: optional filters ----
 st.sidebar.header("보조지표 필터")
@@ -107,9 +155,8 @@ if any(get(k).needs_news for k in selected) and not news_ready:
 st.title("📉 5년 고가 대비 폭락주 스크리너")
 st.caption("기본: 종가 기준 N년 최고가 대비 하락률 ≥ 임계. 보조지표는 사이드바에서 켜고 값 조정.")
 
-col1, col2 = st.columns([1, 3])
-with col1:
-    if st.button("🔄 스캔 (시세 수집·기본 필터)", type="primary"):
+if live_mode:
+    if st.button("🔄 라이브 스캔 (시세 수집·기본 필터)", type="primary"):
         if not markets:
             st.error("시장을 하나 이상 선택하세요.")
         else:
@@ -126,20 +173,35 @@ with col1:
                 )
             prog.empty()
             st.session_state["candidates"] = cands
-            st.session_state["scan_meta"] = {"markets": markets, "n": len(cands)}
+            st.session_state["scan_meta"] = {"src": "라이브", "n": len(cands)}
+else:
+    meta = snapshot.snapshot_meta(SNAP_URL or None)
+    if meta.get("tickers"):
+        st.caption(f"스냅샷: {meta['tickers']}종목 · 최종 {meta.get('last_date','?')} · "
+                   f"{'+'.join(meta.get('markets', []))}")
+    if st.button("📥 최신 스냅샷 불러오기", type="primary") or (
+        st.session_state.get("candidates") is None and snap_available
+    ):
+        with st.spinner("스냅샷 로드 중…"):
+            cands = snapshot.load_candidates(SNAP_URL or None)
+        st.session_state["candidates"] = cands
+        st.session_state["scan_meta"] = {"src": "스냅샷", "n": len(cands)}
 
 cands = st.session_state.get("candidates")
-if cands is None:
-    st.info("좌측에서 시장·기준을 정하고 **스캔**을 누르세요. 스캔 결과(후보군)는 캐시되어, 보조지표는 즉시 다시 필터링됩니다.")
+if not cands:
+    if live_mode:
+        st.info("좌측에서 시장·기준을 정하고 **라이브 스캔**을 누르세요.")
+    else:
+        st.info("매일 자동 스캔된 **스냅샷**을 불러오세요. 보조지표·가중치는 즉시 반영됩니다.")
 else:
     meta = st.session_state.get("scan_meta", {})
-    st.success(f"기본 필터 통과 후보: {meta.get('n', len(cands))}종목  ·  보조지표를 켜면 즉시 좁혀집니다.")
+    st.success(f"후보 {meta.get('n', len(cands))}종목 ({meta.get('src','?')}) · 보조지표를 켜면 즉시 좁혀집니다.")
     rows = engine.apply_filters(cands, base_params=base_params, selected=selected, weights=weights)
     st.subheader(f"결과: {len(rows)}종목 (점수순)")
     if rows:
         front = ["ticker", "name", "market", "점수", "close", "하락률"]
         cols = front + [c for c in rows[0].keys() if c not in front]
-        st.dataframe(rows, use_container_width=True, hide_index=True, column_order=cols)
+        st.dataframe(rows, width="stretch", hide_index=True, column_order=cols)
         st.download_button(
             "결과 CSV 다운로드",
             data=_to_csv(rows),
