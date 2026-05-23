@@ -86,6 +86,30 @@ CREATE TABLE IF NOT EXISTS ops_meta (
   value TEXT,
   updated_at TEXT
 );
+
+-- quarterly financials cache (PRD §7.1). One row per ticker+period.
+CREATE TABLE IF NOT EXISTS fundamentals (
+  ticker TEXT NOT NULL,
+  period TEXT NOT NULL,              -- YYYY-MM-DD (quarter end) or YYYY-Qn
+  revenue REAL,
+  op_income REAL,
+  net_income REAL,
+  total_debt REAL,
+  total_equity REAL,
+  fetched_at TEXT,
+  PRIMARY KEY (ticker, period)
+);
+CREATE INDEX IF NOT EXISTS idx_fundamentals_ticker ON fundamentals(ticker, period);
+
+-- catalyst calendar (PRD §7.1). v1.0 tracks earnings dates only.
+CREATE TABLE IF NOT EXISTS catalysts (
+  ticker TEXT NOT NULL,
+  event_type TEXT NOT NULL,           -- 'earnings'
+  scheduled_date TEXT NOT NULL,       -- YYYY-MM-DD
+  fetched_at TEXT,
+  PRIMARY KEY (ticker, event_type, scheduled_date)
+);
+CREATE INDEX IF NOT EXISTS idx_catalysts_ticker ON catalysts(ticker);
 """
 
 

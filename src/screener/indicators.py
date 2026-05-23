@@ -43,6 +43,17 @@ def bollinger(close: pd.Series, window: int = 20, num_std: float = 2.0):
     return mid, mid + num_std * std, mid - num_std * std
 
 
+def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """On-Balance Volume: cumulative volume signed by daily price direction.
+
+    Uses close only (no high/low), so it's unaffected by the screening frame
+    mixing adjusted close with unadjusted OHL.
+    """
+    direction = close.diff().fillna(0.0)
+    signed = volume.where(direction > 0, -volume).where(direction != 0, 0.0)
+    return signed.cumsum()
+
+
 def drawdown_from_high(close: pd.Series, lookback_days: int | None = None) -> float:
     """Percent drop of the latest close below the rolling-window high.
 

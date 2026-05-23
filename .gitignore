@@ -15,6 +15,7 @@ data/screener.db-shm
 data/prices/
 data/universe.json
 data/candidates.parquet
+data/dart_corp_map.json
 exports/
 
 # os / editor

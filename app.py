@@ -191,15 +191,20 @@ for flt in optional_filters():
     if on:
         with st.sidebar.expander(f"⚙️ {flt.label} 설정", expanded=True):
             params = {p.key: render_param(p, flt.key) for p in flt.params}
-            weights[flt.key] = st.slider(
-                f"가중치 · {flt.label}", 0.0, 1.0, float(flt.weight),
-                step=0.05, key=f"w.{flt.key}",
-            )
+            # bonus filters add to the score directly (no weighted-average slot)
+            if not flt.is_bonus:
+                weights[flt.key] = st.slider(
+                    f"가중치 · {flt.label}", 0.0, 1.0, float(flt.weight),
+                    step=0.05, key=f"w.{flt.key}",
+                )
         selected[flt.key] = params
 
 news_ready = bool(os.getenv("NEWSAPI_KEY", "").strip())
 if any(get(k).needs_news for k in selected) and not news_ready:
     st.sidebar.warning("뉴스 필터가 켜졌지만 NEWSAPI_KEY가 없습니다 (.env 설정 필요) — 결과가 비게 됩니다.")
+
+if any(get(k).needs_fundamentals for k in selected) and not os.getenv("DART_API_KEY", "").strip():
+    st.sidebar.info("펀더멘털 필터: DART_API_KEY가 없어 KR 종목은 중립(50점, 제외 안 함) 처리됩니다. US는 정상 동작합니다.")
 
 # ---- Main ----
 st.title("📉 5년 고가 대비 폭락주 스크리너")

@@ -22,7 +22,8 @@ try:
 except Exception:
     pass
 
-from screener import engine, snapshot  # noqa: E402
+from screener import cooldown, engine, snapshot  # noqa: E402
+from screener.data import db as db_mod  # noqa: E402
 from screener.data.universe import SECURITY_TYPES  # noqa: E402
 from screener.notify.telegram import send_message  # noqa: E402
 
@@ -36,6 +37,11 @@ def main() -> int:
     ap.add_argument("--years", type=int, default=5)
     ap.add_argument("--top", type=int, default=15, help="how many to include in the Telegram alert")
     ap.add_argument("--out", default=str(snapshot.DEFAULT_PATH))
+    ap.add_argument("--cooldown-days", type=int, default=cooldown.DEFAULT_BASE_DAYS,
+                    help="suppress re-alerts within this many calendar days (PRD §5.6)")
+    ap.add_argument("--reset-increase", type=float, default=cooldown.DEFAULT_RESET_INCREASE,
+                    help="re-alert sooner if score beats the last alert by this much")
+    ap.add_argument("--no-cooldown", action="store_true", help="disable cooldown (alert top-N regardless)")
     args = ap.parse_args()
 
     base = {"years": args.years, "min_drop_pct": args.min_drop}
@@ -57,15 +63,39 @@ def main() -> int:
 
     # rank by base score for the alert
     rows = engine.apply_filters(cands, base_params=base, selected={})
-    top = rows[: args.top]
-    lines = [f"\U0001F4C9 폭락주 스캔 ({'+'.join(args.markets)}, -{args.min_drop}%) — 후보 {len(rows)}종목",
-             "상위 (점수순):"]
+
+    # cooldown: drop tickers alerted recently unless their score jumped (PRD §5.6)
+    suppressed = []
+    if args.no_cooldown:
+        ranked = rows
+    else:
+        conn = db_mod.get_connection()
+        try:
+            ranked, suppressed = cooldown.filter_alerts(
+                conn, rows, base_days=args.cooldown_days, reset_increase=args.reset_increase)
+        finally:
+            conn.close()
+        print(f"cooldown: {len(ranked)} alertable, {len(suppressed)} suppressed", flush=True)
+
+    top = ranked[: args.top]
+    header = f"\U0001F4C9 폭락주 스캔 ({'+'.join(args.markets)}, -{args.min_drop}%) — 후보 {len(rows)}종목"
+    if suppressed:
+        header += f" (쿨다운 {len(suppressed)} 제외)"
+    lines = [header, "상위 (점수순):"]
     for i, r in enumerate(top, 1):
         lines.append(f"{i}. [{r['market']}] {r['name']} ({r['ticker']}) "
                      f"{r['점수']}점 / {r['하락률']:.0f}% / {r['close']:,}")
     msg = "\n".join(lines)
     print(msg, flush=True)
     send_message(msg)
+
+    # log what we actually alerted so future runs can honor the cooldown
+    if not args.no_cooldown and top:
+        conn = db_mod.get_connection()
+        try:
+            cooldown.record_alerts(conn, top)
+        finally:
+            conn.close()
     return 0
 
 

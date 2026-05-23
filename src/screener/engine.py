@@ -15,8 +15,11 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
+from . import catalysts as catalysts_mod
 from . import filters as filters_pkg
+from . import fundamentals as fundamentals_mod
 from . import news as news_pkg
+from . import valuation as valuation_mod
 from .data import prices as prices_mod
 from .data import universe as universe_mod
 from .filters.base import base_filters, get
@@ -69,7 +72,12 @@ def apply_filters(
     """
     base = base_filters()[0]
     news_keys = [k for k in selected if get(k).needs_news]
-    tech_keys = [k for k in selected if not get(k).needs_news]
+    fund_keys = [k for k in selected if get(k).needs_fundamentals]
+    val_keys = [k for k in selected if get(k).needs_valuation]
+    bonus_keys = [k for k in selected if get(k).is_bonus]
+    tech_keys = [k for k in selected if not get(k).needs_news
+                 and not get(k).needs_fundamentals and not get(k).needs_valuation
+                 and not get(k).is_bonus]
 
     provider = news_pkg.get_provider() if (news_keys and fetch_news) else None
 
@@ -105,6 +113,36 @@ def apply_filters(
         if not passed:
             continue
 
+        # fundamentals pass (external API + cache), only for survivors
+        for key in fund_keys:
+            flt = get(key)
+            if data.fundamentals is None:
+                data.fundamentals = fundamentals_mod.get_fundamentals(data.market, data.ticker)
+            out = flt.apply(data, selected[key])
+            row[flt.label] = out.detail
+            if not out.passed:
+                passed = False
+                break
+            wsum += w(key)
+            sscore += w(key) * out.score
+        if not passed:
+            continue
+
+        # valuation pass (external API + cache), only for survivors
+        for key in val_keys:
+            flt = get(key)
+            if data.valuation is None:
+                data.valuation = valuation_mod.get_valuation(data.market, data.ticker)
+            out = flt.apply(data, selected[key])
+            row[flt.label] = out.detail
+            if not out.passed:
+                passed = False
+                break
+            wsum += w(key)
+            sscore += w(key) * out.score
+        if not passed:
+            continue
+
         # expensive news pass, only for survivors
         for key in news_keys:
             flt = get(key)
@@ -126,7 +164,19 @@ def apply_filters(
         if not passed:
             continue
 
-        row["점수"] = round(sscore / wsum, 1) if wsum else 0.0
+        # bonus pass: never gates, added after normalization (PRD §5.5.2 —
+        # the total may exceed 100). Not part of the weighted average.
+        bonus_total = 0.0
+        for key in bonus_keys:
+            flt = get(key)
+            if flt.needs_catalyst and data.catalyst is None:
+                data.catalyst = catalysts_mod.get_catalyst(data.market, data.ticker)
+            out = flt.apply(data, selected[key])
+            row[flt.label] = out.detail
+            bonus_total += out.score
+
+        base_score = (sscore / wsum) if wsum else 0.0
+        row["점수"] = round(base_score + bonus_total, 1)
         results.append(row)
 
     results.sort(key=lambda r: r.get("점수", 0), reverse=True)

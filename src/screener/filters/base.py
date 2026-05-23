@@ -43,4 +43,5 @@ def load_all() -> None:
     Importing the package's ``__init__`` triggers this; kept explicit so the
     engine can guarantee the registry is populated.
     """
-    from . import drawdown, macd, rsi, volume, moving_average, bollinger, news  # noqa: F401
+    from . import (drawdown, macd, weekly_macd, rsi, volume, moving_average,  # noqa: F401
+                   bollinger, obv, vcp, rs, fundamental, valuation, catalyst, news)
