@@ -113,10 +113,12 @@ def apply_filters(
         if not passed:
             continue
 
-        # fundamentals pass (external API + cache), only for survivors
+        # fundamentals pass (external API + cache), only for survivors.
+        # getattr guards stale TickerData in session_state from before this field
+        # existed (the hosted app keeps candidates across redeploys).
         for key in fund_keys:
             flt = get(key)
-            if data.fundamentals is None:
+            if getattr(data, "fundamentals", None) is None:
                 data.fundamentals = fundamentals_mod.get_fundamentals(data.market, data.ticker)
             out = flt.apply(data, selected[key])
             row[flt.label] = out.detail
@@ -131,7 +133,7 @@ def apply_filters(
         # valuation pass (external API + cache), only for survivors
         for key in val_keys:
             flt = get(key)
-            if data.valuation is None:
+            if getattr(data, "valuation", None) is None:
                 data.valuation = valuation_mod.get_valuation(data.market, data.ticker)
             out = flt.apply(data, selected[key])
             row[flt.label] = out.detail
@@ -169,7 +171,7 @@ def apply_filters(
         bonus_total = 0.0
         for key in bonus_keys:
             flt = get(key)
-            if flt.needs_catalyst and data.catalyst is None:
+            if flt.needs_catalyst and getattr(data, "catalyst", None) is None:
                 data.catalyst = catalysts_mod.get_catalyst(data.market, data.ticker)
             out = flt.apply(data, selected[key])
             row[flt.label] = out.detail

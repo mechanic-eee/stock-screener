@@ -1,6 +1,8 @@
 """RSI below a threshold (oversold) — or above, via the direction param."""
 from __future__ import annotations
 
+import pandas as pd
+
 from .. import indicators, scoring
 from ..models import Filter, FilterOutcome, Param, TickerData
 from .base import register
@@ -11,7 +13,9 @@ def _apply(data: TickerData, p: dict) -> FilterOutcome:
     if len(close) < p["period"] + 5:
         return FilterOutcome(passed=False, detail="짧은 시계열")
     r = indicators.rsi(close, int(p["period"])).iloc[-1]
-    if r != r:  # NaN
+    # rsi() yields pd.NA when there are no down days (zero avg loss); pd.isna
+    # handles both NaN and NA (a bare `r != r` raises on pd.NA).
+    if pd.isna(r):
         return FilterOutcome(passed=False, detail="—")
     thr = p["threshold"]
     oversold = p["direction"] == "이하(과매도)"
