@@ -13,7 +13,7 @@ def _apply(data: TickerData, p: dict) -> FilterOutcome:
     macd_line, signal_line, _ = indicators.macd(close, p["fast"], p["slow"], p["signal"])
     above = macd_line > signal_line
     # bullish cross = was below/equal yesterday, above today
-    cross_up = above & ~above.shift(1).fillna(False)
+    cross_up = above & ~above.shift(1, fill_value=False)
     window = int(p["within_days"])
     recent = cross_up.tail(window)
     crossed = bool(recent.any())

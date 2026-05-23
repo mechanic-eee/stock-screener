@@ -10,6 +10,12 @@ import argparse
 import sys
 from pathlib import Path
 
+# Windows consoles default to cp949; force UTF-8 so Korean labels / em-dashes print.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from screener import engine  # noqa: E402
