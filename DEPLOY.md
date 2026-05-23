@@ -57,11 +57,11 @@ git push -u origin main
 
 ## 4. Streamlit Community Cloud에 앱 띄우기
 1. https://share.streamlit.io 접속 → GitHub로 로그인 → **Create app**.
-2. 저장소 `stock-screener`, 브랜치 `main`, 파일 `app.py` 선택.
+2. 저장소 `mechanic-eee/stock-screener`, 브랜치 `main`, 파일 `app.py` 선택.
 3. **Advanced settings → Python version = 3.12** (3.14는 아직 미지원).
 4. **Secrets** (앱 설정의 Secrets, TOML 형식)에 입력:
    ```toml
-   SNAPSHOT_URL = "https://raw.githubusercontent.com/<당신아이디>/stock-screener/data/candidates.parquet"
+   SNAPSHOT_URL = "https://raw.githubusercontent.com/mechanic-eee/stock-screener/data/candidates.parquet"
    APP_PASSWORD = "원하는_비밀번호"   # 설정하면 접속 시 비번 요구. 빼면 공개.
    # NEWSAPI_KEY = "..."             # 앱에서 뉴스 필터 쓸 거면
    ```
