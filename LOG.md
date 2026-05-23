@@ -20,3 +20,4 @@
 ## [2026-05-23] stock-screener | work | 시장·종목유형 표시 필터 추가(스냅샷 모드에서도 선택), security_type을 TickerData→스냅샷까지 전달. 사이드바 순서 재배치(데이터소스→표시필터→보조지표).
 ## [2026-05-23] stock-screener | fix | 호스팅 AttributeError(옛 session_state TickerData에 security_type 없음) → getattr 방어. Streamlit Cloud use_container_width 폐기경고 → width='stretch'.
 ## [2026-05-23] stock-screener | work | 뉴스 필터 API(NewsAPI) 사용법·한계 정리(무료=로컬전용·영어·100req/일·캐시없음). 실사용화는 다음으로 연기(PLAN 백로그). 세션 정리·저장.
+## [2026-05-23] stock-screener | fix | US 종목유형 분류 정밀도: Trust 운영사/REIT→common(fund 오분류 해결), 채권 Notes→fund 분리, BRK.A 등 클래스주 common 유지(티커 '.' 규칙 제거), UiPath→common(ipath 단어경계로 etn 오탐 수정). 분포 common5136/etf1285/warrant1212/fund400/spac205/pref131. ETN 자체 탐지는 데이터소스 한계로 보류.

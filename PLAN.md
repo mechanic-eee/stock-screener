@@ -15,7 +15,7 @@
 - [x] **[통합③]** 캘리브레이션 백테스트 이관(backtest/) + SQLite→parquet 추출기, 합성데이터 검증
 - [x] **[통합]** 텔레그램 알림 이관, PRD/방법론 문서 docs/로 이관
 - [x] **종목 유형 분류/필터**: security_type(보통주/ETF/ETN/SPAC/우선주/워런트유닛/펀드) 분류·저장 + 스캔 시 포함유형 선택(기본=보통주). UI 멀티셀렉트 + CLI --types.
-- [ ] 종목유형 분류 정밀도 개선: US ETN은 NASDAQ 심볼파일로 거의 탐지 불가(대부분 common/fund로 빠짐), "Trust" 포함 보통주 일부 fund 오분류 가능 → 데이터소스 보강 검토
+- [x] 종목유형 분류 정밀도 개선(US): "Trust" 운영사/REIT→보통주(fund 오분류 해결), 채권성(Senior/Subordinated Notes)→fund 분리, 클래스주(BRK.A) 보통주 유지(티커 '.' 규칙 제거), UiPath etn 오탐 수정(브랜드명 단어경계). 단 US ETN은 NASDAQ 심볼파일이 식별정보 미제공으로 여전히 탐지 거의 0(오탐은 없음) — 정밀 ETN 분류는 별도 데이터소스 필요(백로그).
 - [ ] 감성 스코어러 모델 교체 검토 (KR-FinBERT 등)
 - [ ] PRD 미구현분 통합 후보: 펀더멘털 자동제외(DART/yfinance) · LLM 뉴스분류 · 주봉MACD · 카탈리스트(실적일정) · 쿨다운
 - [ ] 결과를 stock-investing 워치리스트로 보내는 연결(수동/CSV)

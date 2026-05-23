@@ -41,24 +41,34 @@ TYPE_LABELS = {
 
 # --------------------------------------------------------------------- classify
 def _classify_us(name: str, etf_flag: str, ticker: str) -> str:
-    n = name or ""
+    low = (name or "").lower()
     if etf_flag == "Y":
         return "etf"
-    if re.search(r"\bETN\b|Exchange[- ]Traded Note", n, re.I):
+    # ETN: NASDAQ files have no flag, so rely on name + known issuers/keywords.
+    # Word boundaries avoid false hits like "UiPath" matching "ipath".
+    if re.search(r"\betn\b|exchange[- ]traded note|\betracs\b|\bipath\b|\bmicrosectors\b|"
+                 r"index[- ]linked note", low):
         return "etn"
-    if re.search(r"\bETF\b", n, re.I):
+    if re.search(r"\betf\b", low):
         return "etf"
-    # instrument type (units/warrants/rights) takes priority over issuer type
-    if re.search(r"\bWarrants?\b|\bUnits?\b|\bRights?\b", n, re.I) or re.search(r"[.\^$=]", ticker):
+    # instrument type (units/warrants/rights) before issuer type.
+    # ticker symbols ^ $ = mark non-common; '.' dropped (class shares like BRK.A are common)
+    if re.search(r"\bwarrants?\b|\bunits?\b|\brights?\b", low) or re.search(r"[\^$=]", ticker):
         return "warrant_unit"
-    if re.search(r"\bAcquisition\b|\bSPAC\b|Blank Check", n, re.I):
-        return "spac"
-    # only "Preferred" marks preferred — ADS ("Depositary Shares ... common shares")
-    # are common equity and must NOT be caught here
-    if re.search(r"Preferred|\bPref\.?\b", n, re.I):
+    # "Preferred" only — ADS ("Depositary Shares ... common shares") are common equity
+    if re.search(r"preferred|\bpref\.?\b", low):
         return "preferred"
-    if re.search(r"\bTrust\b|\bFund\b|\bIndex\b", n, re.I):
+    if re.search(r"\bacquisition\b|\bspac\b|blank check", low):
+        return "spac"
+    # debt instruments (baby bonds) are not common equity
+    if re.search(r"senior notes|subordinated notes|notes due|debentures", low):
         return "fund"
+    # closed-end funds — NOT bare 'Trust'/'Index' (REITs & many operating cos use Trust)
+    if re.search(r"closed[- ]end|\bfund\b", low):
+        return "fund"
+    # explicit common-equity wording wins over any remaining ambiguity
+    if re.search(r"common stock|common shares|ordinary shares?|american depositary shar", low):
+        return "common"
     return "common"
 
 
