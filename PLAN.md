@@ -33,7 +33,7 @@
 - [x] **시장·종목유형 표시 필터** + 사이드바 재배치(데이터소스↔보조지표 사이). security_type을 스냅샷까지 실어나름.
 - [~] **[다음] 뉴스 필터 실사용화** — 현재 NewsAPI 무료는 (a)배포서버 차단=로컬전용, (b)영어전용→KR 종목 매칭 안됨, (c)100req/일, (d)앱에 캐시 없어 재실행마다 재요청.
   - [x] **① 일일 뉴스 캐시** (2026-05-25): `news_cache` 테이블(source,query,lookback PK) + `news/cache.py`(load/save, 같은 UTC날짜만 유효) + `news.fetch_cached`로 build_bundle 래핑. 같은날 중복쿼리=캐시, None(실패)은 미캐시→재시도. (c)·(d) 해결. 검증: 페이크 프로바이더 네트워크호출 카운트.
-  - [ ] **② 네이버 검색 API 연동** (KR 한글 뉴스) — 사용자가 NAVER client ID/secret 발급 예정. 발급 후 NaverNewsProvider 추가 + market별 provider 선택(KR→naver, US→newsapi), title/description HTML 태그 스트립. 무료 25,000req/일.
+  - [x] **② 네이버 검색 API 연동** (2026-05-25): NaverNewsProvider(news.json, sort=date·display100, lookback 클라 필터, pubDate=RFC2822 파싱, title/desc HTML 태그·엔티티 스트립), get_provider(market)로 KR→naver/US→newsapi/None→best 선택, engine이 종목 market별 provider. 키=NAVER_CLIENT_ID/SECRET(.env, .env.example). app 경고·필터설명 market별로. 검증: 실 API 200(삼성전자 100건·감성+0.15·HTML제거·캐시 hit·필터 passed). **호스팅 KR뉴스 쓰려면 Streamlit Cloud secrets에 NAVER_CLIENT_ID/SECRET 추가(st.secrets→env 브리지가 자동 반영, 코드변경 불요).** (US는 NEWSAPI_KEY 미설정이라 현재 미동작.)
   - [ ] **③ 감성 모델 교체**(KR-FinBERT 등) — Python 3.14+클라우드에서 torch 휠/모델크기 리스크로 보류. 대안: 사전 보강 또는 외부 감성 API.
   - 미국+로컬+마지막필터로 쓰면 무료로도 충분(요청=뉴스단계 도달 종목수).
 - [ ] 전종목 일일 스캔 런타임/비용 튜닝: 전 유형 KR+US ≈ 1만 종목 → 1.5~2.5h(첫 실행). public이라 분 무제한이나 길면 워런트/유닛 제외 또는 US 주1회 등 고려.

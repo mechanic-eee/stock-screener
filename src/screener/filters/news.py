@@ -30,7 +30,8 @@ register(
     Filter(
         key="news",
         label="긍정 뉴스 증가",
-        description="최근 기간 기사 수가 일정 이상이면서 평균 감성이 양(+)인 종목. (NEWSAPI_KEY 필요)",
+        description="최근 기간 기사 수가 일정 이상이면서 평균 감성이 양(+)인 종목. "
+        "KR=네이버 검색(NAVER_CLIENT_ID/SECRET), US=NewsAPI(NEWSAPI_KEY). 키 없는 시장은 중립.",
         needs_news=True,
         weight=0.30,
         params=[

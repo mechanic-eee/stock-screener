@@ -217,9 +217,17 @@ for flt in optional_filters():
                 )
         selected[flt.key] = params
 
-news_ready = bool(os.getenv("NEWSAPI_KEY", "").strip())
-if any(get(k).needs_news for k in selected) and not news_ready:
-    st.sidebar.warning("뉴스 필터가 켜졌지만 NEWSAPI_KEY가 없습니다 (.env 설정 필요) — 결과가 비게 됩니다.")
+news_us = bool(os.getenv("NEWSAPI_KEY", "").strip())                    # US: NewsAPI
+news_kr = bool(os.getenv("NAVER_CLIENT_ID", "").strip()
+               and os.getenv("NAVER_CLIENT_SECRET", "").strip())        # KR: Naver
+if any(get(k).needs_news for k in selected):
+    if not news_us and not news_kr:
+        st.sidebar.warning("뉴스 필터가 켜졌지만 키가 없습니다 — US는 NEWSAPI_KEY, KR은 "
+                           "NAVER_CLIENT_ID/SECRET이 .env에 필요합니다. 결과가 비게 됩니다.")
+    elif news_us and not news_kr:
+        st.sidebar.info("뉴스: US만 동작합니다(NewsAPI). KR은 NAVER_CLIENT_ID/SECRET이 없어 중립 처리됩니다.")
+    elif news_kr and not news_us:
+        st.sidebar.info("뉴스: KR만 동작합니다(네이버). US는 NEWSAPI_KEY가 없어 중립 처리됩니다.")
 
 _fund_primed = st.session_state.get("primed", {}).get("fund", 0)
 if (any(get(k).needs_fundamentals for k in selected)

@@ -11,11 +11,20 @@ same shape and select it in `get_provider`.
 from __future__ import annotations
 
 import datetime as dt
+import html
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional
 
 import requests
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _clean(s: str) -> str:
+    """Strip HTML tags and unescape entities (Naver wraps matches in <b>…)."""
+    return html.unescape(_TAG_RE.sub("", s or "")).strip()
 
 
 @dataclass
@@ -94,8 +103,73 @@ class NewsApiProvider(NewsProvider):
         return out
 
 
-def get_provider() -> NewsProvider:
-    key = os.getenv("NEWSAPI_KEY", "").strip()
-    if key:
-        return NewsApiProvider(key)
+class NaverNewsProvider(NewsProvider):
+    """Naver news search (Korean) — for KR tickers, which NewsAPI's English
+    index can't match. The API has no date-range param, so we pull the newest
+    `display` items (sort=date) and keep those within `lookback_days`.
+    Free quota is 25,000 req/day. Needs NAVER_CLIENT_ID/NAVER_CLIENT_SECRET.
+    """
+
+    name = "naver"
+    ENDPOINT = "https://openapi.naver.com/v1/search/news.json"
+
+    def __init__(self, client_id: str, client_secret: str):
+        self.client_id = client_id
+        self.client_secret = client_secret
+
+    def available(self) -> bool:
+        return bool(self.client_id and self.client_secret)
+
+    def fetch(self, query: str, lookback_days: int) -> Optional[list[Article]]:
+        from email.utils import parsedate_to_datetime
+
+        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=lookback_days)
+        try:
+            resp = requests.get(
+                self.ENDPOINT,
+                params={"query": query, "display": 100, "sort": "date"},
+                headers={"X-Naver-Client-Id": self.client_id,
+                         "X-Naver-Client-Secret": self.client_secret},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except (requests.RequestException, ValueError):
+            return None
+        out: list[Article] = []
+        for a in payload.get("items", []):
+            try:
+                ts = parsedate_to_datetime(a.get("pubDate", ""))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=dt.timezone.utc)
+            except (TypeError, ValueError):
+                ts = dt.datetime.now(dt.timezone.utc)
+            if ts < cutoff:
+                continue  # newest-first, but keep scanning — items can be slightly out of order
+            out.append(Article(
+                title=_clean(a.get("title", "")),
+                description=_clean(a.get("description", "")),
+                published_at=ts,
+                source="naver",
+            ))
+        return out
+
+
+def get_provider(market: Optional[str] = None) -> NewsProvider:
+    """Pick a news source by market: KR -> Naver (Korean news), US -> NewsAPI.
+    Each falls back to NullProvider when its credentials are absent (the news
+    filter then treats news as unavailable). `market=None` prefers NewsAPI."""
+    naver_id = os.getenv("NAVER_CLIENT_ID", "").strip()
+    naver_secret = os.getenv("NAVER_CLIENT_SECRET", "").strip()
+    newsapi = os.getenv("NEWSAPI_KEY", "").strip()
+
+    if market == "KR":
+        return NaverNewsProvider(naver_id, naver_secret) if (naver_id and naver_secret) else NullProvider()
+    if market == "US":
+        return NewsApiProvider(newsapi) if newsapi else NullProvider()
+    # unspecified: best available, NewsAPI first
+    if newsapi:
+        return NewsApiProvider(newsapi)
+    if naver_id and naver_secret:
+        return NaverNewsProvider(naver_id, naver_secret)
     return NullProvider()

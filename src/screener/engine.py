@@ -91,7 +91,7 @@ def apply_filters(
                  and not get(k).needs_fundamentals and not get(k).needs_valuation
                  and not get(k).is_bonus]
 
-    provider = news_pkg.get_provider() if (news_keys and fetch_news) else None
+    news_enabled = bool(news_keys) and fetch_news
 
     def w(key: str) -> float:
         if weights and key in weights:
@@ -161,7 +161,10 @@ def apply_filters(
         if not passed:
             continue
 
-        # expensive news pass, only for survivors
+        # expensive news pass, only for survivors. Provider is chosen per ticker
+        # by market (KR -> Naver Korean news, US -> NewsAPI); fetches are cached
+        # for the day so repeated runs don't burn the rate limit.
+        provider = news_pkg.get_provider(data.market) if news_enabled else None
         for key in news_keys:
             flt = get(key)
             params = selected[key]
