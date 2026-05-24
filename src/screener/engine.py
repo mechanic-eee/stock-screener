@@ -62,6 +62,7 @@ def apply_filters(
     selected: dict[str, dict],
     fetch_news: bool = True,
     weights: dict[str, float] | None = None,
+    diag: dict[str, list[int]] | None = None,
 ) -> list[dict]:
     """selected maps optional-filter-key -> its param dict.
 
@@ -69,7 +70,18 @@ def apply_filters(
     detail string and a weighted composite `점수` (0-100). `weights` overrides
     per-filter weights (key -> weight); base + active filters all contribute,
     normalized by total weight so the score stays 0-100 for any selection.
+
+    If `diag` is provided it is filled with per-filter availability counts —
+    diag[key] = [unavailable, evaluated] — so a caller can tell when a toggled
+    filter got no usable data and fell back to neutral-for-all (silently inert).
     """
+    def note(key: str, out) -> None:
+        if diag is None:
+            return
+        d = diag.setdefault(key, [0, 0])
+        d[1] += 1
+        if not out.available:
+            d[0] += 1
     base = base_filters()[0]
     news_keys = [k for k in selected if get(k).needs_news]
     fund_keys = [k for k in selected if get(k).needs_fundamentals]
@@ -104,6 +116,7 @@ def apply_filters(
         for key in tech_keys:
             flt = get(key)
             out = flt.apply(data, selected[key])
+            note(key, out)
             row[flt.label] = out.detail
             if not out.passed:
                 passed = False
@@ -121,6 +134,7 @@ def apply_filters(
             if getattr(data, "fundamentals", None) is None:
                 data.fundamentals = fundamentals_mod.get_fundamentals(data.market, data.ticker)
             out = flt.apply(data, selected[key])
+            note(key, out)
             row[flt.label] = out.detail
             if not out.passed:
                 passed = False
@@ -136,6 +150,7 @@ def apply_filters(
             if getattr(data, "valuation", None) is None:
                 data.valuation = valuation_mod.get_valuation(data.market, data.ticker)
             out = flt.apply(data, selected[key])
+            note(key, out)
             row[flt.label] = out.detail
             if not out.passed:
                 passed = False
@@ -157,6 +172,7 @@ def apply_filters(
                     recent_days=int(params.get("recent_days", 7)),
                 )
             out = flt.apply(data, params)
+            note(key, out)
             row[flt.label] = out.detail
             if not out.passed:
                 passed = False

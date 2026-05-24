@@ -19,6 +19,21 @@ _BENCH = {"US": "^GSPC", "KR": "KS11"}  # S&P 500, KOSPI
 _cache: dict[str, Optional[pd.Series]] = {}
 
 
+def prime(mapping: dict[str, Optional[pd.Series]]) -> None:
+    """Seed the per-process cache from a precomputed source (e.g. the snapshot).
+
+    The hosted app can't reliably fetch ^GSPC/KS11 live (rate-limited/blocked),
+    so the daily scan bakes the benchmark series into the snapshot and the app
+    primes them here — get_benchmark() then returns the cached series without
+    any network call, and the relative-strength filter actually works.
+    """
+    for market, series in mapping.items():
+        if series is not None and not series.empty:
+            s = series.dropna()
+            s.index = pd.to_datetime(s.index)
+            _cache[market] = s
+
+
 def get_benchmark(market: str, years: int = 2) -> Optional[pd.Series]:
     """Benchmark close series for a market (date-indexed), or None if unavailable."""
     if market in _cache:

@@ -21,6 +21,11 @@ from .models import TickerData
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PATH = ROOT / "data" / "candidates.parquet"
+# Sidecar published next to the candidates snapshot (same dir / same URL prefix):
+# the market benchmark series, so the hosted app can run relative-strength
+# without a live ^GSPC/KS11 fetch (which is blocked/rate-limited on the host).
+BENCH_PATH = ROOT / "data" / "benchmarks.parquet"
+BENCH_NAME = "benchmarks.parquet"
 
 
 def export_candidates(candidates: list[TickerData], path: str | Path = DEFAULT_PATH) -> Path:
@@ -77,6 +82,75 @@ def load_candidates(source: Optional[str | Path] = None) -> list[TickerData]:
             return []
         df = pd.read_parquet(src)
     return _frame_to_candidates(df)
+
+
+def export_benchmarks(markets: list[str], path: str | Path = BENCH_PATH) -> Optional[Path]:
+    """Fetch each market's benchmark series and write a small long-format parquet
+    (market, date, close). Returns the path, or None if nothing was fetched."""
+    from . import benchmark as benchmark_mod
+
+    frames = []
+    for market in markets:
+        s = benchmark_mod.get_benchmark(market)
+        if s is None or s.empty:
+            continue
+        df = s.rename("close").reset_index()
+        df.columns = ["date", "close"]
+        df["market"] = market
+        frames.append(df)
+    if not frames:
+        return None
+    out = pd.concat(frames, ignore_index=True)[["market", "date", "close"]]
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_parquet(path, index=False)
+    return path
+
+
+def _read_parquet(src: str) -> Optional[pd.DataFrame]:
+    try:
+        if src.startswith("http://") or src.startswith("https://"):
+            import requests
+            resp = requests.get(src, timeout=30)
+            resp.raise_for_status()
+            return pd.read_parquet(io.BytesIO(resp.content))
+        if Path(src).exists():
+            return pd.read_parquet(src)
+    except Exception:
+        return None
+    return None
+
+
+def _sibling(source: Optional[str | Path], name: str) -> str:
+    """Resolve a sibling artifact's path/URL next to the candidates snapshot."""
+    if source is None:
+        return str(BENCH_PATH)
+    s = str(source)
+    if s.startswith("http://") or s.startswith("https://"):
+        return s.rsplit("/", 1)[0] + "/" + name
+    return str(Path(s).parent / name)
+
+
+def load_benchmarks(source: Optional[str | Path] = None) -> dict[str, pd.Series]:
+    """Load the benchmark sidecar that sits next to the candidates snapshot."""
+    df = _read_parquet(_sibling(source, BENCH_NAME))
+    if df is None or df.empty:
+        return {}
+    df["date"] = pd.to_datetime(df["date"])
+    out: dict[str, pd.Series] = {}
+    for market, g in df.groupby("market", sort=False):
+        out[str(market)] = g.sort_values("date").set_index("date")["close"]
+    return out
+
+
+def prime_benchmarks(source: Optional[str | Path] = None) -> dict[str, pd.Series]:
+    """Load the benchmark sidecar and seed the benchmark cache (no-op if absent)."""
+    from . import benchmark as benchmark_mod
+
+    series = load_benchmarks(source)
+    if series:
+        benchmark_mod.prime(series)
+    return series
 
 
 def snapshot_meta(source: Optional[str | Path] = None) -> dict:

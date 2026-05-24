@@ -171,8 +171,12 @@ else:
     ):
         with st.spinner("스냅샷 로드 중…"):
             loaded = snapshot.load_candidates(SNAP_URL or None)
+            # prime the benchmark cache from the sidecar so relative-strength
+            # works on the host without a live ^GSPC/KS11 fetch.
+            primed = snapshot.prime_benchmarks(SNAP_URL or None)
         st.session_state["candidates"] = loaded
-        st.session_state["scan_meta"] = {"src": "스냅샷", "n": len(loaded)}
+        st.session_state["scan_meta"] = {"src": "스냅샷", "n": len(loaded),
+                                          "bench": sorted(primed.keys())}
 
 cands = st.session_state.get("candidates")
 
@@ -229,7 +233,21 @@ else:
     meta = st.session_state.get("scan_meta", {})
     st.success(f"후보 {meta.get('n', len(cands))}종목 ({meta.get('src','?')}) · "
                f"표시 필터·보조지표로 즉시 좁혀집니다.")
-    rows = engine.apply_filters(shown, base_params=base_params, selected=selected, weights=weights)
+    diag: dict[str, list[int]] = {}
+    rows = engine.apply_filters(shown, base_params=base_params, selected=selected,
+                                weights=weights, diag=diag)
+    # Warn about any active filter that got no usable data for *every* evaluated
+    # ticker: it fell back to neutral-for-all, so it changes neither the result
+    # count nor the ranking (common on the hosted app where live external fetches
+    # — RS benchmark, valuation, fundamentals — are blocked/rate-limited).
+    for key in selected:
+        d = diag.get(key)
+        if d and d[1] > 0 and d[0] == d[1]:
+            st.warning(
+                f"⚠️ '{get(key).label}' 필터: 필요한 데이터를 가져오지 못해 평가된 전 종목이 "
+                f"중립(50)으로 처리됐습니다 — 결과 수·순위에 영향이 없습니다. "
+                f"(배포 환경에서는 외부 데이터(벤치마크·재무·밸류) 실시간 호출이 차단될 수 있어요.)"
+            )
     st.subheader(f"결과: {len(rows)}종목 (점수순) · 후보 {len(shown)}/{len(cands)}")
     if rows:
         front = ["ticker", "name", "market", "점수", "close", "하락률"]

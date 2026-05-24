@@ -61,6 +61,11 @@ def main() -> int:
     out_path = snapshot.export_candidates(cands, args.out)
     print(f"snapshot written: {out_path} ({len(cands)} tickers)", flush=True)
 
+    # Bake the benchmark series next to the snapshot so the hosted app can run
+    # relative-strength without a live ^GSPC/KS11 fetch (blocked on the host).
+    bench_path = snapshot.export_benchmarks(args.markets)
+    print(f"benchmark snapshot: {bench_path}", flush=True)
+
     # rank by base score for the alert
     rows = engine.apply_filters(cands, base_params=base, selected={})
 

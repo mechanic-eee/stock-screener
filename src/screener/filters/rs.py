@@ -25,13 +25,15 @@ def _apply(data: TickerData, p: dict) -> FilterOutcome:
 
     bench = benchmark.get_benchmark(data.market)
     if bench is None or bench.empty:
-        return FilterOutcome(passed=True, detail="벤치마크 없음(중립)", value=50.0, score=50.0)
+        return FilterOutcome(passed=True, detail="벤치마크 없음(중립)", value=50.0,
+                             score=50.0, available=False)
 
     idx = pd.to_datetime(close.index)
     start_date, end_date = idx[-1 - window], idx[-1]
     b_win = bench[(bench.index >= start_date) & (bench.index <= end_date)]
     if len(b_win) < 2:
-        return FilterOutcome(passed=True, detail="벤치 정렬부족(중립)", value=50.0, score=50.0)
+        return FilterOutcome(passed=True, detail="벤치 정렬부족(중립)", value=50.0,
+                             score=50.0, available=False)
 
     stock_ret = float(close.iloc[-1]) / float(close.iloc[-1 - window]) - 1.0
     bench_ret = float(b_win.iloc[-1]) / float(b_win.iloc[0]) - 1.0

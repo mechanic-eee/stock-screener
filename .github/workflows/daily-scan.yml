@@ -65,11 +65,17 @@ jobs:
         run: |
           test -f data/candidates.parquet || { echo "no snapshot produced"; exit 1; }
           cp data/candidates.parquet "$RUNNER_TEMP/candidates.parquet"
+          # benchmark sidecar is optional — only publish it if it was produced
+          cp data/benchmarks.parquet "$RUNNER_TEMP/benchmarks.parquet" 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan data
           git rm -rf . >/dev/null 2>&1 || true
           cp "$RUNNER_TEMP/candidates.parquet" candidates.parquet
           git add candidates.parquet
+          if [ -f "$RUNNER_TEMP/benchmarks.parquet" ]; then
+            cp "$RUNNER_TEMP/benchmarks.parquet" benchmarks.parquet
+            git add benchmarks.parquet
+          fi
           git commit -m "snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push -f origin data

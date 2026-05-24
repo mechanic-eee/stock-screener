@@ -24,6 +24,8 @@
   - [x] **펀더멘털 자동제외(§5.4.3)** — fundamentals.py(US=yfinance/KR=DART), filters/fundamental.py(weight 0.25), engine 확장패스+캐시테이블. **US+KR(DART) 실데이터 검증 완료.** account_id 매칭·전년동분기 YoY·corp_code 디스크캐시. 키는 .env(DART_API_KEY).
   - [x] **카탈리스트(§5.4.5/§5.5.2)** — catalysts.py(yfinance earnings_dates, US+KR), filters/catalyst.py 보너스필터(임박 ⚠️경고 + 실적후 3거래일내 MACD전환 시 +5), is_bonus 메커니즘(정규화 후 가산, 100초과 가능), engine 보너스패스+catalysts 캐시테이블. US+KR 실데이터 검증 완료.
   - [ ] **LLM 뉴스분류(§5.4.2)** — Anthropic 키(유료)+뉴스 파이프라인 실사용화 선행 필요(현재 백로그).
+- [x] **[버그수정] enrichment 필터 무음 먹통** — "필터 적용해도 결과 수·순서가 안 바뀜". 원인: RS/밸류/펀더가 호스팅에서 외부데이터 fetch 실패 시 전 종목 중립50→안 걸러지고+순위 불변. ⓐ FilterOutcome.available 플래그 + engine diag 집계 + 앱 경고(투명성). ⓑ 벤치마크를 스냅샷 사이드카(benchmarks.parquet)로 구워 daily_scan 발행·앱 prime→RS가 라이브fetch 없이 작동. 재현/AppTest 검증 완료.
+- [ ] **[버그수정 후속/B확장] 밸류에이션·펀더멘털도 스냅샷 사전계산** — RS 벤치마크는 처리됐으나 밸류(yfinance.info)·펀더(DART/yfinance)는 여전히 호스팅에서 라이브 실패→중립(경고는 뜸). daily_scan에서 후보별 ValuationBundle/FundamentalsBundle 사전계산해 스냅샷 사이드카로. 선행: daily-scan.yml env에 DART_API_KEY 주입(현재 누락), 스캔 런타임 증가 감내.
 - [ ] 결과를 stock-investing 워치리스트로 보내는 연결(수동/CSV)
 - [x] **[클라우드 배포 완료]** GitHub repo(mechanic-eee/stock-screener, public, main) push, gh CLI 설치, Actions 일일 워크플로우, Streamlit Cloud 연결(사용자, Python 3.12, SNAPSHOT_URL/APP_PASSWORD). 첫 KR 실행 성공(24분)→data 브랜치 스냅샷, raw URL 로드 검증.
 - [x] **스케줄 설정**: 평일만(cron 0 22 * * 1-5 = 화~토 07:00 KST), KR+US, 전 종목유형, 임계 −50%, 텔레그램 상위 15.

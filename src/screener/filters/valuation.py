@@ -18,7 +18,8 @@ from .base import register
 def _apply(data: TickerData, p: dict) -> FilterOutcome:
     vb = data.valuation
     if vb is None or not vb.available:
-        return FilterOutcome(passed=True, detail="밸류 데이터 없음(중립)", value=50.0, score=50.0)
+        return FilterOutcome(passed=True, detail="밸류 데이터 없음(중립)", value=50.0,
+                             score=50.0, available=False)
 
     score = scoring.valuation_score(vb.per, vb.pbr, vb.roe, vb.dividend_yield)
     parts: list[str] = []

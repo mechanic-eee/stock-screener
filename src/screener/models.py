@@ -44,6 +44,11 @@ class FilterOutcome:
     detail: str = ""
     value: Optional[float] = None
     score: float = 0.0
+    # False when the filter could not get the data it needs and fell back to a
+    # neutral score (e.g. benchmark/valuation/fundamentals fetch failed, no news
+    # key). The engine aggregates these so the UI can warn that a toggled filter
+    # is silently inert — neutral-for-all changes neither the count nor the rank.
+    available: bool = True
 
 
 @dataclass

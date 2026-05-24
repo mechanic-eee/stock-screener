@@ -19,7 +19,8 @@ from .base import register
 def _apply(data: TickerData, p: dict) -> FilterOutcome:
     fb = data.fundamentals
     if fb is None or not fb.available:
-        return FilterOutcome(passed=True, detail="재무없음(중립)", value=50.0, score=50.0)
+        return FilterOutcome(passed=True, detail="재무없음(중립)", value=50.0,
+                             score=50.0, available=False)
 
     violations: list[str] = []
     if fb.revenue_yoy is not None and fb.revenue_yoy < float(p["rev_yoy_floor"]) / 100.0:

@@ -14,7 +14,7 @@ from .base import register
 def _apply(data: TickerData, p: dict) -> FilterOutcome:
     bundle = data.news
     if bundle is None:
-        return FilterOutcome(passed=False, detail="뉴스없음", score=0.0)
+        return FilterOutcome(passed=False, detail="뉴스없음", score=0.0, available=False)
     enough = bundle.recent_count >= p["min_recent_articles"]
     positive = bundle.avg_sentiment >= p["min_sentiment"]
     ok = enough and positive
