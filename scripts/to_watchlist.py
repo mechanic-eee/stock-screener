@@ -11,9 +11,15 @@ Source (in priority order):
   --snapshot URL    a candidates snapshot (raw URL or local path); default is
                     the live cloud snapshot on the repo's data branch.
 
+Ranking is by the base (drawdown) score unless --indicators turns optional
+indicators on, in which case the composite (base + weighted indicators) ranks
+the shortlist — far more discriminating than base alone (where many tie at 100).
+
 Examples:
   python scripts/to_watchlist.py --top 10
-  python scripts/to_watchlist.py --market US --min-score 70 --dry-run
+  python scripts/to_watchlist.py --indicators relative_strength fundamental valuation --top 10
+  python scripts/to_watchlist.py --indicators all --market US --dry-run
+  python scripts/to_watchlist.py --list-indicators
   python scripts/to_watchlist.py --tickers AAPL,005930
   python scripts/to_watchlist.py --csv screener_results.csv --top 15
 """
@@ -41,22 +47,68 @@ US_HEADER = "## 🇺🇸"
 
 
 # --------------------------------------------------------------------------- #
+# Indicator-weighted ranking helpers
+# --------------------------------------------------------------------------- #
+def _optional_keys() -> list[str]:
+    """Optional filter keys that help rank offline: excludes the news filter
+    (needs a key + network) and bonus filters (don't shape the weighted rank)."""
+    from screener import engine
+    from screener.filters.base import optional_filters
+
+    engine.ensure_filters_loaded()
+    return [f.key for f in optional_filters() if not f.needs_news and not f.is_bonus]
+
+
+def _resolve_indicators(names: list[str]) -> dict[str, dict]:
+    """Map requested indicator keys (or 'all') to {key: {}} — each filter uses
+    its own defaults (apply_filters merges them), acting as scorer+gate."""
+    from screener.filters.base import get
+
+    available = _optional_keys()
+    if any(n.lower() == "all" for n in names):
+        return {k: {} for k in available}
+    selected: dict[str, dict] = {}
+    for n in names:
+        try:
+            get(n)
+        except KeyError:
+            raise SystemExit(f"unknown indicator '{n}'. 사용 가능: {', '.join(available)} (또는 all)")
+        selected[n] = {}
+    return selected
+
+
+def _parse_weights(s: str | None) -> dict[str, float]:
+    if not s:
+        return {}
+    out: dict[str, float] = {}
+    for pair in s.split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        k, _, v = pair.partition("=")
+        out[k.strip()] = float(v)
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # Ranked rows from a source
 # --------------------------------------------------------------------------- #
-def _rows_from_snapshot(source: str, min_drop: int, years: int) -> list[dict]:
+def _rows_from_snapshot(source: str, min_drop: int, years: int,
+                        selected: dict | None = None, weights: dict | None = None) -> list[dict]:
     from screener import engine, snapshot
 
     engine.ensure_filters_loaded()
     cands = snapshot.load_candidates(source)
-    # priming lets RS/valuation/fundamentals contribute if the sidecars exist,
-    # but base score alone is enough to rank — prime best-effort, ignore failures.
+    # priming lets RS/valuation/fundamentals contribute without live fetches if
+    # the sidecars exist (needed when --indicators turns those on for ranking).
     for fn in (snapshot.prime_benchmarks, snapshot.prime_valuations, snapshot.prime_fundamentals):
         try:
             fn(source)
         except Exception:  # noqa: BLE001
             pass
     base = {"years": years, "min_drop_pct": min_drop}
-    return engine.apply_filters(cands, base_params=base, selected={})
+    return engine.apply_filters(cands, base_params=base, selected=selected or {},
+                                weights=weights or None, fetch_news=False)
 
 
 def _rows_from_csv(path: str) -> list[dict]:
@@ -161,18 +213,40 @@ def main() -> int:
     ap.add_argument("--min-score", type=float, default=0.0, help="only send candidates at/above this score")
     ap.add_argument("--market", nargs="+", choices=["KR", "US"], help="restrict to these markets")
     ap.add_argument("--tickers", help="comma-separated tickers to send (overrides --top selection)")
+    ap.add_argument("--indicators", nargs="+", metavar="KEY",
+                    help="rank by base + these indicators (or 'all'); each uses its default params "
+                         "so it both scores and gates. Snapshot source only. --list-indicators to see keys.")
+    ap.add_argument("--weights", metavar="key=w,...", help="override indicator weights, e.g. relative_strength=0.3,fundamental=0.4")
+    ap.add_argument("--list-indicators", action="store_true", help="print available indicator keys and exit")
     ap.add_argument("--min-drop", type=int, default=50, help="base drawdown %% (must match the snapshot)")
     ap.add_argument("--years", type=int, default=5)
     ap.add_argument("--watchlist", default=str(DEFAULT_WATCHLIST), help="WATCHLIST.md to merge into")
     ap.add_argument("--dry-run", action="store_true", help="preview rows without writing")
     args = ap.parse_args()
 
+    if args.list_indicators:
+        from screener.filters.base import get
+        print("사용 가능한 지표 (key — 라벨, 기본가중치):")
+        for k in _optional_keys():
+            f = get(k)
+            print(f"  {k:18s} — {f.label} (w={f.weight})")
+        print("\n예: --indicators relative_strength fundamental valuation  |  --indicators all")
+        return 0
+
+    if args.csv and args.indicators:
+        print("ERROR: --indicators는 가격 데이터가 필요해 스냅샷 소스에서만 동작합니다 (--csv와 함께 못 씀).", flush=True)
+        return 1
+
+    selected = _resolve_indicators(args.indicators) if args.indicators else {}
+    weights = _parse_weights(args.weights)
+
     if args.csv:
         rows = _rows_from_csv(args.csv)
         print(f"source: csv {args.csv} ({len(rows)} rows)", flush=True)
     else:
-        rows = _rows_from_snapshot(args.snapshot, args.min_drop, args.years)
-        print(f"source: snapshot {args.snapshot} ({len(rows)} candidates)", flush=True)
+        rows = _rows_from_snapshot(args.snapshot, args.min_drop, args.years, selected, weights)
+        ind = ("+".join(selected) if selected else "base-only")
+        print(f"source: snapshot {args.snapshot} ({len(rows)} candidates) · 랭킹={ind}", flush=True)
 
     if args.market:
         rows = [r for r in rows if r["market"] in set(args.market)]
