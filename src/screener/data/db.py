@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS fundamentals (
   net_income REAL,
   total_debt REAL,
   total_equity REAL,
+  shares REAL,                       -- shares outstanding (for price-based market cap)
   fetched_at TEXT,
   PRIMARY KEY (ticker, period)
 );
@@ -130,6 +131,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(tickers)")}
     if "security_type" not in cols:
         conn.execute("ALTER TABLE tickers ADD COLUMN security_type TEXT DEFAULT 'common'")
+    fcols = {r[1] for r in conn.execute("PRAGMA table_info(fundamentals)")}
+    if "shares" not in fcols:
+        conn.execute("ALTER TABLE fundamentals ADD COLUMN shares REAL")
 
 
 _initialized: set[str] = set()

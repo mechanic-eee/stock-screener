@@ -89,14 +89,24 @@ def _fast_info_market_cap(ticker: str) -> Optional[float]:
         return None
 
 
-def _computed_valuation(market: str, ticker: str, market_cap: Optional[float]) -> ValuationBundle:
-    """PER/PBR/ROE from market cap + the latest cached fundamentals (equity,
-    net income). Shared by KR (cap from the tickers table) and the US fallback
-    (cap from fast_info). Net income is annualized from the cumulative report —
-    a screening estimate, not audited TTM. Dividend yield is unavailable here."""
+def _raw(market: str, ticker: str) -> Optional[dict]:
+    """Latest cached fundamentals (ensuring a fetch first). For US, a cache row
+    predating the `shares` column (NULL shares) is refreshed once so the
+    price-based market cap can be computed."""
     fundamentals_mod.get_fundamentals(market, ticker)  # ensure cached
     raw = fundamentals_mod.latest_raw(ticker)
-    if not market_cap or not raw or not raw.get("total_equity"):
+    if market == "US" and raw is not None and raw.get("shares") is None:
+        fundamentals_mod.get_fundamentals(market, ticker, use_cache=False)
+        raw = fundamentals_mod.latest_raw(ticker)
+    return raw
+
+
+def _bundle_from(raw: Optional[dict], market_cap: Optional[float]) -> ValuationBundle:
+    """PER/PBR/ROE from market cap + latest cached fundamentals (equity, net
+    income). ROE needs no market cap, so it's available even when the cap is
+    missing. Net income is annualized from the cumulative report — a screening
+    estimate, not audited TTM. Dividend yield is unavailable on this path."""
+    if not raw or not raw.get("total_equity"):
         return ValuationBundle(available=False)
 
     equity = float(raw["total_equity"])
@@ -104,8 +114,8 @@ def _computed_valuation(market: str, ticker: str, market_cap: Optional[float]) -
     month = int(raw["period"][5:7]) if raw.get("period") else 12
     ni_annual = float(ni) * _ANNUALIZE.get(month, 1.0) if ni is not None else None
 
-    pbr = market_cap / equity if equity > 0 else None
-    per = market_cap / ni_annual if (ni_annual and ni_annual > 0) else None
+    pbr = market_cap / equity if (market_cap and equity > 0) else None
+    per = market_cap / ni_annual if (market_cap and ni_annual and ni_annual > 0) else None
     roe = ni_annual / equity if (ni_annual is not None and equity > 0) else None
     if all(v is None for v in (per, pbr, roe)):
         return ValuationBundle(available=False)
@@ -113,26 +123,36 @@ def _computed_valuation(market: str, ticker: str, market_cap: Optional[float]) -
 
 
 def _kr_valuation(ticker: str) -> ValuationBundle:
-    return _computed_valuation("KR", ticker, _market_cap(ticker))
+    return _bundle_from(_raw("KR", ticker), _market_cap(ticker))
 
 
-def _us_valuation(ticker: str) -> ValuationBundle:
-    # Compute from fast_info cap + cached fundamentals first (works on datacenter
-    # IPs); fall back to the richer `.info` when the computed path lacks data
-    # (e.g. local runs without cached fundamentals).
-    computed = _computed_valuation("US", ticker, _fast_info_market_cap(ticker))
-    if computed.available:
-        return computed
+def _us_valuation(ticker: str, last_price: Optional[float] = None) -> ValuationBundle:
+    # Yahoo blocks .info AND fast_info from datacenter IPs (GitHub Actions), so
+    # derive the market cap from the snapshot price x balance-sheet shares (both
+    # from endpoints that work there). fast_info / .info are local-only fallbacks.
+    raw = _raw("US", ticker)
+    market_cap = None
+    if raw and last_price and raw.get("shares"):
+        market_cap = float(last_price) * float(raw["shares"])
+    if market_cap is None:
+        market_cap = _fast_info_market_cap(ticker)
+    bundle = _bundle_from(raw, market_cap)
+    if bundle.available:
+        return bundle
     return _us_valuation_info(ticker)
 
 
-def get_valuation(market: str, ticker: str) -> ValuationBundle:
-    """Valuation multiples for a ticker; available=False -> treat as neutral."""
+def get_valuation(market: str, ticker: str, last_price: Optional[float] = None) -> ValuationBundle:
+    """Valuation multiples for a ticker; available=False -> treat as neutral.
+
+    `last_price` (latest close) lets US valuation compute market cap as
+    price x shares when `.info`/`fast_info` are blocked (the hosted/Actions case).
+    """
     cached = _primed.get(ticker)
     if cached is not None:
         return cached
     try:
-        return _us_valuation(ticker) if market == "US" else _kr_valuation(ticker)
+        return _us_valuation(ticker, last_price) if market == "US" else _kr_valuation(ticker)
     except Exception as e:  # noqa: BLE001 — never kill the scan
         log.warning("valuation failed %s/%s: %s", market, ticker, e)
         return ValuationBundle(available=False)

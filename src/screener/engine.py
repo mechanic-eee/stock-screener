@@ -148,7 +148,8 @@ def apply_filters(
         for key in val_keys:
             flt = get(key)
             if getattr(data, "valuation", None) is None:
-                data.valuation = valuation_mod.get_valuation(data.market, data.ticker)
+                last_close = float(data.prices["close"].iloc[-1]) if not data.prices.empty else None
+                data.valuation = valuation_mod.get_valuation(data.market, data.ticker, last_price=last_close)
             out = flt.apply(data, selected[key])
             note(key, out)
             row[flt.label] = out.detail

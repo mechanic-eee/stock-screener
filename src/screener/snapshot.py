@@ -243,10 +243,12 @@ def export_valuations(
     from . import valuation as valuation_mod
 
     targets = _enrich_targets(candidates, types)
-    pairs = _threaded_map(
-        targets, lambda c: valuation_mod.get_valuation(c.market, c.ticker),
-        max_workers, progress_cb,
-    )
+
+    def _val(c):
+        last = float(c.prices["close"].iloc[-1]) if not c.prices.empty else None
+        return valuation_mod.get_valuation(c.market, c.ticker, last_price=last)
+
+    pairs = _threaded_map(targets, _val, max_workers, progress_cb)
     rows = [{
         "ticker": c.ticker, "available": bool(vb.available),
         "per": vb.per, "pbr": vb.pbr, "roe": vb.roe, "dividend_yield": vb.dividend_yield,

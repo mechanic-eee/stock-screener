@@ -130,6 +130,9 @@ def _fetch_us(ticker: str) -> list[dict]:
     ni = _series_row(inc, "Net Income", "Net Income Common Stockholders")
     debt = _series_row(bs, "Total Debt")
     eq = _series_row(bs, "Stockholders Equity", "Common Stock Equity")
+    # shares outstanding -> price-based market cap (yfinance .info/.fast_info are
+    # blocked on datacenter IPs, but the balance sheet endpoint works there)
+    shr = _series_row(bs, "Ordinary Shares Number", "Share Issued")
 
     def val(s, col):
         if s is None or col not in s.index:
@@ -146,6 +149,7 @@ def _fetch_us(ticker: str) -> list[dict]:
             "net_income": val(ni, col),
             "total_debt": val(debt, col),
             "total_equity": val(eq, col),
+            "shares": val(shr, col),
         })
     return [r for r in rows
             if any(r[k] is not None for k in ("revenue", "op_income", "net_income", "total_equity"))]
@@ -366,10 +370,10 @@ def _save(conn, ticker: str, rows: list[dict]) -> None:
     now = db_mod.now_iso()
     conn.executemany(
         "INSERT OR REPLACE INTO fundamentals"
-        "(ticker, period, revenue, op_income, net_income, total_debt, total_equity, fetched_at)"
-        " VALUES (?,?,?,?,?,?,?,?)",
+        "(ticker, period, revenue, op_income, net_income, total_debt, total_equity, shares, fetched_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
         [(ticker, r["period"], r.get("revenue"), r.get("op_income"), r.get("net_income"),
-          r.get("total_debt"), r.get("total_equity"), now) for r in rows],
+          r.get("total_debt"), r.get("total_equity"), r.get("shares"), now) for r in rows],
     )
     conn.commit()
 
@@ -379,10 +383,10 @@ def latest_raw(ticker: str) -> Optional[dict]:
     conn = db_mod.get_connection()
     try:
         r = conn.execute(
-            "SELECT period, net_income, total_equity FROM fundamentals "
+            "SELECT period, net_income, total_equity, shares FROM fundamentals "
             "WHERE ticker=? ORDER BY period DESC LIMIT 1", (ticker,)
         ).fetchone()
-        return {"period": r[0], "net_income": r[1], "total_equity": r[2]} if r else None
+        return {"period": r[0], "net_income": r[1], "total_equity": r[2], "shares": r[3]} if r else None
     finally:
         conn.close()
 
