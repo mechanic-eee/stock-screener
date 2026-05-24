@@ -2,6 +2,7 @@
 
 > 관련: 리서치/결정은 `..\stock-investing\` (워치리스트·결정 로그). 이 레포는 **후보를 자동으로 찾고 점수화하는 도구**다. 여기서 나온 후보를 stock-investing 워치리스트로 옮겨 추적한다.
 > 설계 참고: `docs/PRD-reference.md`, `docs/calibration-methodology-reference.md` (선행 프로젝트에서 이관한 제품 설계서·캘리브레이션 방법론).
+> **사용법: [`docs/indicator-guide.md`](docs/indicator-guide.md) — 보조지표 의미·게이트vs스코어러·실전 조합.**
 
 ## 무엇을 / 왜
 종가 기준 **최근 N년(기본 5년) 최고가 대비 일정 비율(기본 −80%) 이상 폭락**한 종목을 기본 후보로 잡고, **보조지표 필터를 켜고/끄고 파라미터를 조정**하며 후보를 좁힌다. 각 지표는 단순 통과/탈락이 아니라 **0~100 점수**도 내며(게이트=필터+스코어러), 가중 합성점수로 후보를 **순위화**한다.
@@ -21,7 +22,7 @@ scan.py                CLI 배치 스캔 / 스모크 테스트
 backtest/
   calibrate_gates.py   게이트 임계치 캘리브레이션(전향수익률 백테스트)
   export_prices.py     SQLite → parquet 추출 (캘리브레이션 입력)
-docs/                  PRD·캘리브레이션 방법론 참고문서
+docs/                  지표 사용 가이드(indicator-guide) · PRD · 캘리브레이션 방법론
 src/screener/
   models.py            TickerData / Filter / Param / FilterOutcome(+score)
   indicators.py        MACD·RSI·볼린저·MA·하락률 (pure pandas)
