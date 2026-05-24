@@ -171,12 +171,30 @@ else:
     ):
         with st.spinner("스냅샷 로드 중…"):
             loaded = snapshot.load_candidates(SNAP_URL or None)
-            # prime the enrichment caches from the sidecars so relative-strength,
+
+            # Prime the enrichment caches from the sidecars so relative-strength,
             # valuation and fundamentals work on the host without live fetches
             # (^GSPC/KS11, yfinance.info, DART are blocked/rate-limited there).
-            primed = snapshot.prime_benchmarks(SNAP_URL or None)
-            primed_val = snapshot.prime_valuations(SNAP_URL or None)
-            primed_fund = snapshot.prime_fundamentals(SNAP_URL or None)
+            # Each is an optimization: if a sidecar is missing/old or priming
+            # fails, the filter just falls back to live/neutral — never crash the
+            # whole app on load.
+            # getattr-by-name (not snapshot.fn directly) so a stale/old snapshot
+            # module missing a newer prime_* function degrades gracefully instead
+            # of raising AttributeError before the try/except can catch it.
+            def _prime(fn_name):
+                fn = getattr(snapshot, fn_name, None)
+                if fn is None:
+                    st.sidebar.caption(f"⚠️ {fn_name} 없음 — 배포 코드 갱신 필요(앱 Reboot)")
+                    return {}
+                try:
+                    return fn(SNAP_URL or None)
+                except Exception as e:  # noqa: BLE001
+                    st.sidebar.caption(f"⚠️ 사전계산 로드 일부 실패: {type(e).__name__}")
+                    return {}
+
+            primed = _prime("prime_benchmarks")
+            primed_val = _prime("prime_valuations")
+            primed_fund = _prime("prime_fundamentals")
         st.session_state["candidates"] = loaded
         st.session_state["scan_meta"] = {"src": "스냅샷", "n": len(loaded),
                                           "bench": sorted(primed.keys())}
