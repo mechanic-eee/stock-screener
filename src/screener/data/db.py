@@ -102,6 +102,17 @@ CREATE TABLE IF NOT EXISTS fundamentals (
 );
 CREATE INDEX IF NOT EXISTS idx_fundamentals_ticker ON fundamentals(ticker, period);
 
+-- daily news cache: one row per (source, query, lookback) so repeated runs /
+-- multiple tickers don't re-hit the rate-limited news API the same day.
+CREATE TABLE IF NOT EXISTS news_cache (
+  source TEXT NOT NULL,               -- provider name (newsapi / naver / ...)
+  query TEXT NOT NULL,
+  lookback_days INTEGER NOT NULL,
+  fetched_at TEXT NOT NULL,           -- ISO; freshness checked by calendar date
+  articles_json TEXT,                 -- JSON list of {title,description,published_at,source}
+  PRIMARY KEY (source, query, lookback_days)
+);
+
 -- catalyst calendar (PRD §7.1). v1.0 tracks earnings dates only.
 CREATE TABLE IF NOT EXISTS catalysts (
   ticker TEXT NOT NULL,
