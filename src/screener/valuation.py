@@ -39,7 +39,9 @@ def prime(mapping: dict[str, ValuationBundle]) -> None:
             _primed[str(ticker)] = vb
 
 
-def _us_valuation(ticker: str) -> ValuationBundle:
+def _us_valuation_info(ticker: str) -> ValuationBundle:
+    """Richest US source (PER/PBR/ROE + dividend), but Yahoo blocks `.info` from
+    datacenter IPs (GitHub Actions), so it's the fallback, not the primary path."""
     import yfinance as yf
 
     try:
@@ -71,10 +73,28 @@ def _market_cap(ticker: str) -> Optional[float]:
         conn.close()
 
 
-def _kr_valuation(ticker: str) -> ValuationBundle:
-    market_cap = _market_cap(ticker)
-    # ensure DART financials are cached, then read the latest raw figures
-    fundamentals_mod.get_fundamentals("KR", ticker)
+def _fast_info_market_cap(ticker: str) -> Optional[float]:
+    """Market cap via yfinance fast_info — the quote (v8) endpoint, same family
+    as the price download that works fine on datacenter IPs (unlike `.info`)."""
+    import yfinance as yf
+
+    try:
+        fi = yf.Ticker(ticker).fast_info
+        # FastInfo: attribute access is snake_case (.market_cap); its .get() uses
+        # camelCase ("marketCap"). Use the attribute to avoid that mismatch.
+        mc = getattr(fi, "market_cap", None)
+        return float(mc) if mc else None
+    except Exception as e:  # noqa: BLE001 — fail-soft
+        log.warning("fast_info market cap failed US/%s: %s", ticker, e)
+        return None
+
+
+def _computed_valuation(market: str, ticker: str, market_cap: Optional[float]) -> ValuationBundle:
+    """PER/PBR/ROE from market cap + the latest cached fundamentals (equity,
+    net income). Shared by KR (cap from the tickers table) and the US fallback
+    (cap from fast_info). Net income is annualized from the cumulative report —
+    a screening estimate, not audited TTM. Dividend yield is unavailable here."""
+    fundamentals_mod.get_fundamentals(market, ticker)  # ensure cached
     raw = fundamentals_mod.latest_raw(ticker)
     if not market_cap or not raw or not raw.get("total_equity"):
         return ValuationBundle(available=False)
@@ -90,6 +110,20 @@ def _kr_valuation(ticker: str) -> ValuationBundle:
     if all(v is None for v in (per, pbr, roe)):
         return ValuationBundle(available=False)
     return ValuationBundle(available=True, per=per, pbr=pbr, roe=roe, dividend_yield=None)
+
+
+def _kr_valuation(ticker: str) -> ValuationBundle:
+    return _computed_valuation("KR", ticker, _market_cap(ticker))
+
+
+def _us_valuation(ticker: str) -> ValuationBundle:
+    # Compute from fast_info cap + cached fundamentals first (works on datacenter
+    # IPs); fall back to the richer `.info` when the computed path lacks data
+    # (e.g. local runs without cached fundamentals).
+    computed = _computed_valuation("US", ticker, _fast_info_market_cap(ticker))
+    if computed.available:
+        return computed
+    return _us_valuation_info(ticker)
 
 
 def get_valuation(market: str, ticker: str) -> ValuationBundle:
