@@ -42,6 +42,12 @@ def main() -> int:
     ap.add_argument("--reset-increase", type=float, default=cooldown.DEFAULT_RESET_INCREASE,
                     help="re-alert sooner if score beats the last alert by this much")
     ap.add_argument("--no-cooldown", action="store_true", help="disable cooldown (alert top-N regardless)")
+    ap.add_argument("--no-enrich", action="store_true",
+                    help="skip valuation/fundamentals precompute sidecars")
+    ap.add_argument("--enrich-types", nargs="+", default=["common", "preferred"], choices=SECURITY_TYPES,
+                    help="security types to precompute valuation/fundamentals for (default: common preferred)")
+    ap.add_argument("--enrich-workers", type=int, default=8,
+                    help="parallel workers for the valuation/fundamentals fetch")
     args = ap.parse_args()
 
     base = {"years": args.years, "min_drop_pct": args.min_drop}
@@ -65,6 +71,21 @@ def main() -> int:
     # relative-strength without a live ^GSPC/KS11 fetch (blocked on the host).
     bench_path = snapshot.export_benchmarks(args.markets)
     print(f"benchmark snapshot: {bench_path}", flush=True)
+
+    # Precompute valuation/fundamentals bundles into sidecars so the hosted app
+    # can run those filters without live yfinance.info / DART calls (blocked on
+    # the host). Fundamentals first so KR valuation reuses its warmed cache.
+    if not args.no_enrich:
+        def ecb(i, total, ticker):
+            if i % 100 == 0 or i == total:
+                print(f"  enrich {i}/{total}", flush=True)
+
+        fund_path = snapshot.export_fundamentals(
+            cands, types=args.enrich_types, max_workers=args.enrich_workers, progress_cb=ecb)
+        print(f"fundamentals snapshot: {fund_path}", flush=True)
+        val_path = snapshot.export_valuations(
+            cands, types=args.enrich_types, max_workers=args.enrich_workers, progress_cb=ecb)
+        print(f"valuation snapshot: {val_path}", flush=True)
 
     # rank by base score for the alert
     rows = engine.apply_filters(cands, base_params=base, selected={})

@@ -33,6 +33,19 @@ log = logging.getLogger(__name__)
 REFRESH_DAYS = 80          # financials change at most quarterly
 _YOY_TOLERANCE_DAYS = 60   # how far from "exactly 1 year ago" a YoY match may be
 
+# Per-process cache of precomputed derived bundles, keyed by ticker. The hosted
+# app has neither a DART key nor the SQLite cache (screener.db isn't published),
+# so the daily scan bakes the derived FundamentalsBundle into a sidecar and the
+# app primes them here — get_fundamentals() then returns it without any fetch.
+_primed: dict[str, FundamentalsBundle] = {}
+
+
+def prime(mapping: dict[str, FundamentalsBundle]) -> None:
+    """Seed the per-process fundamentals cache from a precomputed source (snapshot)."""
+    for ticker, fb in mapping.items():
+        if fb is not None:
+            _primed[str(ticker)] = fb
+
 
 # --------------------------------------------------------------------------- #
 # Derived-signal computation (market-agnostic)
@@ -381,6 +394,11 @@ def get_fundamentals(market: str, ticker: str, use_cache: bool = True,
     Always returns a bundle; `available=False` means no usable data (treat as
     neutral, never exclude).
     """
+    if use_cache:
+        primed = _primed.get(ticker)
+        if primed is not None:
+            return primed
+
     conn = db_mod.get_connection()
     try:
         if use_cache:

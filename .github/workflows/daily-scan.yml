@@ -54,6 +54,9 @@ jobs:
           NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # KR fundamentals/valuation come from DART; without this repo secret the
+          # KR enrichment sidecars are unavailable-only (fail-soft). US uses yfinance.
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
           PYTHONUTF8: "1"
         run: |
           python scripts/daily_scan.py \
@@ -65,17 +68,21 @@ jobs:
         run: |
           test -f data/candidates.parquet || { echo "no snapshot produced"; exit 1; }
           cp data/candidates.parquet "$RUNNER_TEMP/candidates.parquet"
-          # benchmark sidecar is optional — only publish it if it was produced
-          cp data/benchmarks.parquet "$RUNNER_TEMP/benchmarks.parquet" 2>/dev/null || true
+          # sidecars are optional — stage each only if it was produced
+          for f in benchmarks valuations fundamentals; do
+            cp "data/$f.parquet" "$RUNNER_TEMP/$f.parquet" 2>/dev/null || true
+          done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan data
           git rm -rf . >/dev/null 2>&1 || true
           cp "$RUNNER_TEMP/candidates.parquet" candidates.parquet
           git add candidates.parquet
-          if [ -f "$RUNNER_TEMP/benchmarks.parquet" ]; then
-            cp "$RUNNER_TEMP/benchmarks.parquet" benchmarks.parquet
-            git add benchmarks.parquet
-          fi
+          for f in benchmarks valuations fundamentals; do
+            if [ -f "$RUNNER_TEMP/$f.parquet" ]; then
+              cp "$RUNNER_TEMP/$f.parquet" "$f.parquet"
+              git add "$f.parquet"
+            fi
+          done
           git commit -m "snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push -f origin data

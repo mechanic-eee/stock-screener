@@ -26,6 +26,14 @@ DEFAULT_PATH = ROOT / "data" / "candidates.parquet"
 # without a live ^GSPC/KS11 fetch (which is blocked/rate-limited on the host).
 BENCH_PATH = ROOT / "data" / "benchmarks.parquet"
 BENCH_NAME = "benchmarks.parquet"
+# Enrichment sidecars: precomputed valuation/fundamentals bundles per ticker, so
+# the hosted app can run those filters without live yfinance.info / DART calls
+# (blocked/rate-limited on the host). Computed in the daily scan where the DART
+# key + SQLite cache are present, baked here, primed by the app on load.
+VAL_PATH = ROOT / "data" / "valuations.parquet"
+VAL_NAME = "valuations.parquet"
+FUND_PATH = ROOT / "data" / "fundamentals.parquet"
+FUND_NAME = "fundamentals.parquet"
 
 
 def export_candidates(candidates: list[TickerData], path: str | Path = DEFAULT_PATH) -> Path:
@@ -174,3 +182,165 @@ def snapshot_meta(source: Optional[str | Path] = None) -> dict:
         "last_date": str(pd.to_datetime(df["date"]).max().date()),
         "markets": sorted(df["market"].unique().tolist()),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Enrichment sidecars (valuation / fundamentals)
+# --------------------------------------------------------------------------- #
+def _opt_float(v):
+    return None if (v is None or pd.isna(v)) else float(v)
+
+
+def _threaded_map(items, fn, max_workers, progress_cb):
+    """Apply fn to each item, optionally across a thread pool (network I/O bound).
+
+    Returns a list of (item, result). `fn` is expected to be fail-soft (never
+    raise); any stray exception is swallowed so one bad ticker can't abort the
+    whole snapshot. Results arrive in completion order, which is fine — each row
+    is keyed by ticker.
+    """
+    results = []
+    total = len(items)
+    if max_workers and max_workers > 1 and total > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futs = {ex.submit(fn, it): it for it in items}
+            for i, fut in enumerate(as_completed(futs), 1):
+                it = futs[fut]
+                try:
+                    results.append((it, fut.result()))
+                except Exception:  # noqa: BLE001 — never abort the snapshot
+                    pass
+                if progress_cb:
+                    progress_cb(i, total, it.ticker)
+    else:
+        for i, it in enumerate(items, 1):
+            try:
+                results.append((it, fn(it)))
+            except Exception:  # noqa: BLE001
+                pass
+            if progress_cb:
+                progress_cb(i, total, it.ticker)
+    return results
+
+
+def _enrich_targets(candidates: list[TickerData], types) -> list[TickerData]:
+    """Only enrich security types where valuation/fundamentals are meaningful
+    (common/preferred by default); ETFs/SPACs/warrants have no useful multiples."""
+    wanted = set(types)
+    return [c for c in candidates if getattr(c, "security_type", "common") in wanted]
+
+
+def export_valuations(
+    candidates: list[TickerData],
+    path: str | Path = VAL_PATH,
+    types=("common", "preferred"),
+    max_workers: int = 8,
+    progress_cb=None,
+) -> Optional[Path]:
+    """Fetch each candidate's valuation bundle and write a per-ticker parquet."""
+    from . import valuation as valuation_mod
+
+    targets = _enrich_targets(candidates, types)
+    pairs = _threaded_map(
+        targets, lambda c: valuation_mod.get_valuation(c.market, c.ticker),
+        max_workers, progress_cb,
+    )
+    rows = [{
+        "ticker": c.ticker, "available": bool(vb.available),
+        "per": vb.per, "pbr": vb.pbr, "roe": vb.roe, "dividend_yield": vb.dividend_yield,
+    } for c, vb in pairs]
+    out = pd.DataFrame(rows, columns=["ticker", "available", "per", "pbr", "roe", "dividend_yield"])
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_parquet(path, index=False)
+    return path
+
+
+def export_fundamentals(
+    candidates: list[TickerData],
+    path: str | Path = FUND_PATH,
+    types=("common", "preferred"),
+    max_workers: int = 8,
+    progress_cb=None,
+) -> Optional[Path]:
+    """Fetch each candidate's derived fundamentals bundle and write a parquet."""
+    from . import fundamentals as fundamentals_mod
+
+    targets = _enrich_targets(candidates, types)
+    pairs = _threaded_map(
+        targets, lambda c: fundamentals_mod.get_fundamentals(c.market, c.ticker),
+        max_workers, progress_cb,
+    )
+    rows = [{
+        "ticker": c.ticker, "available": bool(fb.available),
+        "revenue_yoy": fb.revenue_yoy, "op_margin": fb.op_margin,
+        "debt_to_equity": fb.debt_to_equity,
+        "four_quarters_all_loss": bool(fb.four_quarters_all_loss),
+        "capital_impairment": bool(fb.capital_impairment), "periods": int(fb.periods),
+    } for c, fb in pairs]
+    out = pd.DataFrame(rows, columns=[
+        "ticker", "available", "revenue_yoy", "op_margin", "debt_to_equity",
+        "four_quarters_all_loss", "capital_impairment", "periods"])
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_parquet(path, index=False)
+    return path
+
+
+def load_valuations(source: Optional[str | Path] = None) -> dict:
+    """Load the valuation sidecar -> {ticker: ValuationBundle}."""
+    from .models import ValuationBundle
+
+    df = _read_parquet(_sibling(source, VAL_NAME))
+    if df is None or df.empty:
+        return {}
+    out = {}
+    for r in df.itertuples(index=False):
+        out[str(r.ticker)] = ValuationBundle(
+            available=bool(r.available),
+            per=_opt_float(r.per), pbr=_opt_float(r.pbr),
+            roe=_opt_float(r.roe), dividend_yield=_opt_float(r.dividend_yield),
+        )
+    return out
+
+
+def load_fundamentals(source: Optional[str | Path] = None) -> dict:
+    """Load the fundamentals sidecar -> {ticker: FundamentalsBundle}."""
+    from .models import FundamentalsBundle
+
+    df = _read_parquet(_sibling(source, FUND_NAME))
+    if df is None or df.empty:
+        return {}
+    out = {}
+    for r in df.itertuples(index=False):
+        out[str(r.ticker)] = FundamentalsBundle(
+            available=bool(r.available),
+            revenue_yoy=_opt_float(r.revenue_yoy), op_margin=_opt_float(r.op_margin),
+            debt_to_equity=_opt_float(r.debt_to_equity),
+            four_quarters_all_loss=bool(r.four_quarters_all_loss),
+            capital_impairment=bool(r.capital_impairment),
+            periods=int(r.periods) if not pd.isna(r.periods) else 0,
+        )
+    return out
+
+
+def prime_valuations(source: Optional[str | Path] = None) -> dict:
+    """Load the valuation sidecar and seed the valuation cache (no-op if absent)."""
+    from . import valuation as valuation_mod
+
+    m = load_valuations(source)
+    if m:
+        valuation_mod.prime(m)
+    return m
+
+
+def prime_fundamentals(source: Optional[str | Path] = None) -> dict:
+    """Load the fundamentals sidecar and seed the fundamentals cache (no-op if absent)."""
+    from . import fundamentals as fundamentals_mod
+
+    m = load_fundamentals(source)
+    if m:
+        fundamentals_mod.prime(m)
+    return m

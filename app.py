@@ -171,12 +171,16 @@ else:
     ):
         with st.spinner("스냅샷 로드 중…"):
             loaded = snapshot.load_candidates(SNAP_URL or None)
-            # prime the benchmark cache from the sidecar so relative-strength
-            # works on the host without a live ^GSPC/KS11 fetch.
+            # prime the enrichment caches from the sidecars so relative-strength,
+            # valuation and fundamentals work on the host without live fetches
+            # (^GSPC/KS11, yfinance.info, DART are blocked/rate-limited there).
             primed = snapshot.prime_benchmarks(SNAP_URL or None)
+            primed_val = snapshot.prime_valuations(SNAP_URL or None)
+            primed_fund = snapshot.prime_fundamentals(SNAP_URL or None)
         st.session_state["candidates"] = loaded
         st.session_state["scan_meta"] = {"src": "스냅샷", "n": len(loaded),
                                           "bench": sorted(primed.keys())}
+        st.session_state["primed"] = {"val": len(primed_val), "fund": len(primed_fund)}
 
 cands = st.session_state.get("candidates")
 
@@ -217,7 +221,9 @@ news_ready = bool(os.getenv("NEWSAPI_KEY", "").strip())
 if any(get(k).needs_news for k in selected) and not news_ready:
     st.sidebar.warning("뉴스 필터가 켜졌지만 NEWSAPI_KEY가 없습니다 (.env 설정 필요) — 결과가 비게 됩니다.")
 
-if any(get(k).needs_fundamentals for k in selected) and not os.getenv("DART_API_KEY", "").strip():
+_fund_primed = st.session_state.get("primed", {}).get("fund", 0)
+if (any(get(k).needs_fundamentals for k in selected)
+        and not os.getenv("DART_API_KEY", "").strip() and not _fund_primed):
     st.sidebar.info("펀더멘털 필터: DART_API_KEY가 없어 KR 종목은 중립(50점, 제외 안 함) 처리됩니다. US는 정상 동작합니다.")
 
 # ---- Main ----

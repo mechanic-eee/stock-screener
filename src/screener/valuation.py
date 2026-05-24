@@ -25,6 +25,19 @@ log = logging.getLogger(__name__)
 # cumulative report period -> annualization factor (period-end month -> x)
 _ANNUALIZE = {3: 4.0, 6: 2.0, 9: 4.0 / 3.0, 12: 1.0}
 
+# Per-process cache of precomputed bundles, keyed by ticker. The hosted app can't
+# fetch yfinance `.info` / DART live (blocked/rate-limited), so the daily scan
+# bakes valuation bundles into a sidecar and the app primes them here — then
+# get_valuation() returns the cached bundle with no network call.
+_primed: dict[str, ValuationBundle] = {}
+
+
+def prime(mapping: dict[str, ValuationBundle]) -> None:
+    """Seed the per-process valuation cache from a precomputed source (snapshot)."""
+    for ticker, vb in mapping.items():
+        if vb is not None:
+            _primed[str(ticker)] = vb
+
 
 def _us_valuation(ticker: str) -> ValuationBundle:
     import yfinance as yf
@@ -81,6 +94,9 @@ def _kr_valuation(ticker: str) -> ValuationBundle:
 
 def get_valuation(market: str, ticker: str) -> ValuationBundle:
     """Valuation multiples for a ticker; available=False -> treat as neutral."""
+    cached = _primed.get(ticker)
+    if cached is not None:
+        return cached
     try:
         return _us_valuation(ticker) if market == "US" else _kr_valuation(ticker)
     except Exception as e:  # noqa: BLE001 — never kill the scan

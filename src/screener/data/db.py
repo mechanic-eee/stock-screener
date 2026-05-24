@@ -140,8 +140,12 @@ def get_connection(db_path: str | Path = DEFAULT_DB) -> sqlite3.Connection:
     if key not in _initialized:
         init_db(db_path)  # idempotent; ensures schema exists once per process
         _initialized.add(key)
-    conn = sqlite3.connect(key)
+    # timeout/busy_timeout let concurrent writers wait instead of erroring — the
+    # enrichment exports fan out fundamentals fetches across threads, each of
+    # which may write to the cache.
+    conn = sqlite3.connect(key, timeout=30)
     conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
