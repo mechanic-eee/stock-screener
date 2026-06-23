@@ -149,8 +149,24 @@ def list_kr(min_market_cap: float = MIN_MARKET_CAP_KRW) -> list[dict]:
     df["security_type"] = [_classify_kr(n) for n in df["name"]]
     df["is_excluded"] = 0
     df["exclude_reason"] = None
-    # quality exclusion only (type handled separately); cap applies to common stock
-    small = (df["market_cap"].fillna(0) < min_market_cap) & (df["security_type"] == "common")
+
+    # exchange-confirmed exclusion: 관리종목 / 투자주의환기종목 (any type). A deep
+    # drawdown + admin flag is the textbook delisting-bound falling knife, so we
+    # cut it at the universe stage rather than scoring it. Fail-soft: an empty
+    # dict (fetch failed) simply excludes nothing.
+    from . import market_actions
+    admin = market_actions.kr_excluded(listing_df=lst)
+    if admin:
+        flagged = df["ticker"].map(lambda c: admin.get(str(c)))
+        hit = flagged.notna()
+        df.loc[hit, "is_excluded"] = 1
+        df.loc[hit, "exclude_reason"] = "admin_issue:" + flagged[hit].astype(str)
+        log.info("KR admin gate: excluded %d 관리/투자주의환기 종목", int(hit.sum()))
+
+    # quality exclusion (type handled separately); cap applies to common stock,
+    # and only where an admin flag hasn't already excluded the row.
+    small = ((df["market_cap"].fillna(0) < min_market_cap)
+             & (df["security_type"] == "common") & (df["is_excluded"] == 0))
     df.loc[small, "is_excluded"] = 1
     df.loc[small, "exclude_reason"] = "below_market_cap"
 
