@@ -17,6 +17,9 @@ data/universe.json
 data/candidates.parquet
 data/benchmarks.parquet
 data/dart_corp_map.json
+data/kr_admin_cache.json
+data/valuations.parquet
+data/fundamentals.parquet
 exports/
 
 # os / editor

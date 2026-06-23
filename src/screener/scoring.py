@@ -73,6 +73,16 @@ def linear(x: float, x0: float, x1: float, y0: float = 0.0, y1: float = 100.0) -
     return _piecewise(x, [(x0, y0), (x1, y1)])
 
 
+def atr_risk_score(atr_pct: float) -> float:
+    """Tradeability/risk from daily volatility (ATR as % of price).
+
+    Higher score = calmer, more sizable name; lower = a wild 'lottery ticket'
+    falling knife where equal-weight buying blows up position risk. Tight (<=2%)
+    -> 100, extreme (>=15%) -> 0. Informational by default (filter weight 0).
+    """
+    return _piecewise(atr_pct, [(2.0, 100), (4.0, 70), (7.0, 40), (12.0, 10), (15.0, 0)])
+
+
 def obv_accumulation_score(net_ratio: float) -> float:
     """OBV net accumulation over the window as a fraction of traded volume.
 

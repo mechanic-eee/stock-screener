@@ -44,4 +44,5 @@ def load_all() -> None:
     engine can guarantee the registry is populated.
     """
     from . import (drawdown, macd, weekly_macd, rsi, volume, moving_average,  # noqa: F401
-                   bollinger, obv, vcp, rs, fundamental, valuation, catalyst, news)
+                   bollinger, obv, vcp, rs, fundamental, valuation, catalyst, news,
+                   atr_risk)

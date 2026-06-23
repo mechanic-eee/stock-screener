@@ -54,6 +54,25 @@ def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
     return signed.cumsum()
 
 
+def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
+    """Average True Range (Wilder's smoothing).
+
+    True Range = max(high-low, |high-prev_close|, |low-prev_close|). Smoothed
+    with the same Wilder EMA as RSI for consistency. If high/low are missing
+    (some feeds give close only), falls back to the absolute close-to-close move
+    so the result is still a usable volatility proxy.
+    """
+    prev_close = close.shift(1)
+    if high is None or low is None or high.isna().all() or low.isna().all():
+        tr = close.diff().abs()
+    else:
+        hl = (high - low).abs()
+        hc = (high - prev_close).abs()
+        lc = (low - prev_close).abs()
+        tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    return tr.ewm(alpha=1 / window, adjust=False).mean()
+
+
 def drawdown_from_high(close: pd.Series, lookback_days: int | None = None) -> float:
     """Percent drop of the latest close below the rolling-window high.
 

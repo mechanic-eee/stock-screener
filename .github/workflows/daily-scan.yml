@@ -41,11 +41,15 @@ jobs:
 
       # Persist the SQLite price cache between runs so we don't refetch
       # everything from scratch each day.
+      # Fixed key so the cache actually hits day-to-day. A run_id key never
+      # exact-matches, so every run was a cache miss -> full refetch (the cause
+      # of the 8min vs 1h11m runtime swing). actions/cache still updates the
+      # entry at job end, so the DB stays fresh.
       - name: Restore price cache
         uses: actions/cache@v4
         with:
           path: data/screener.db
-          key: screener-db-${{ github.run_id }}
+          key: screener-db-v1
           restore-keys: |
             screener-db-
 
