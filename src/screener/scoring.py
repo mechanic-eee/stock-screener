@@ -73,6 +73,41 @@ def linear(x: float, x0: float, x1: float, y0: float = 0.0, y1: float = 100.0) -
     return _piecewise(x, [(x0, y0), (x1, y1)])
 
 
+def piotroski_score(f_score: float) -> float:
+    """Piotroski F-score (0-9 financial-strength signals) -> 0-100, linear."""
+    return _piecewise(f_score, [(0, 0), (9, 100)])
+
+
+def altman_z_score(z: float) -> float:
+    """Altman Z'' (emerging-market/non-manufacturing) distance from bankruptcy.
+
+    Distress zone Z'' < 1.1 -> 0; grey 1.1-2.6; safe Z'' >= 2.6 -> 100. Linear
+    between. Higher = farther from default = better survival odds for a fallen name.
+    """
+    return _piecewise(z, [(1.1, 0), (2.6, 100)])
+
+
+def accruals_score(accrual_ratio: float) -> float:
+    """Earnings quality from accruals = (NI - CFO)/assets. Cash-backed earnings
+    (negative accruals) score high; high accruals (possible earnings mirage on a
+    'turnaround') score low. -10% -> 100, 0 -> 60, +10% -> 0."""
+    return _piecewise(accrual_ratio, [(-0.10, 100), (0.0, 60), (0.10, 0)])
+
+
+def gross_profitability_score(gp_to_assets: float) -> float:
+    """Novy-Marx gross profitability = gross profit / assets. The cleanest
+    quality line (separates a temporarily cheap good business from a dying one).
+    0 -> 0, 15% -> 50, 33%+ -> 100."""
+    return _piecewise(gp_to_assets, [(0.0, 0), (0.15, 50), (0.33, 100)])
+
+
+def share_issuance_score(change_yoy: float) -> float:
+    """Shares-outstanding YoY change. Buybacks (shares shrinking) score high,
+    dilution (issuing stock to survive a fall) scores low. -10% -> 100, 0 -> 60,
+    +20% -> 0."""
+    return _piecewise(change_yoy, [(-0.10, 100), (0.0, 60), (0.20, 0)])
+
+
 def atr_risk_score(atr_pct: float) -> float:
     """Tradeability/risk from daily volatility (ATR as % of price).
 

@@ -57,6 +57,25 @@ def _to_date(s: str) -> Optional[date]:
         return None
 
 
+def _yoy_row(rows: list[dict], cur_d: Optional[date]) -> Optional[dict]:
+    """The row whose period is closest to ~1 year before cur_d (within tolerance).
+
+    Used for the trend signals (Piotroski deltas, share issuance) — guards each
+    field itself, so unlike the revenue-YoY finder it has no field requirement.
+    """
+    if cur_d is None:
+        return None
+    best, best_gap = None, 1e9
+    for r in rows[1:]:
+        d = _to_date(r.get("period"))
+        if d is None:
+            continue
+        gap = abs((cur_d - d).days - 365)
+        if gap < best_gap:
+            best, best_gap = r, gap
+    return best if best_gap <= _YOY_TOLERANCE_DAYS else None
+
+
 def _signals_from_rows(rows: list[dict]) -> FundamentalsBundle:
     """Compute the PRD §5.4.3 signals from normalized period rows."""
     rows = [r for r in rows if r.get("period")]
@@ -91,8 +110,42 @@ def _signals_from_rows(rows: list[dict]) -> FundamentalsBundle:
             revenue_yoy = (revenue - prev_rev) / abs(prev_rev)
 
     # 4 consecutive quarters of losses (needs >=4 quarterly net-income points)
-    ni = [r.get("net_income") for r in rows[:4] if r.get("net_income") is not None]
-    four_q_all_loss = len(ni) >= 4 and all(x < 0 for x in ni)
+    ni_hist = [r.get("net_income") for r in rows[:4] if r.get("net_income") is not None]
+    four_q_all_loss = len(ni_hist) >= 4 and all(x < 0 for x in ni_hist)
+
+    # --- extra derived signals (all guard their own inputs; None when missing) ---
+    ni = cur.get("net_income")
+    cfo = cur.get("op_cash_flow")
+    gp = cur.get("gross_profit")
+    ta = cur.get("total_assets")
+    ca = cur.get("current_assets")
+    cl = cur.get("current_liabilities")
+    re = cur.get("retained_earnings")
+    shares = cur.get("shares")
+    prev = _yoy_row(rows, cur_d)
+
+    accrual_ratio = ((ni - cfo) / ta) if (ni is not None and cfo is not None and ta and ta > 0) else None
+    gross_profitability = (gp / ta) if (gp is not None and ta and ta > 0) else None
+
+    # Altman Z'' (emerging-market / non-manufacturing). Total liabilities is
+    # derived (assets - equity) since `total_debt` is interest-bearing only.
+    # Guard the denominators; EBIT/RE may legitimately be negative (that lowers Z).
+    altman_z = None
+    if (ta and ta > 0 and ca is not None and cl is not None and re is not None
+            and op_income is not None and equity is not None):
+        tl = ta - equity
+        if tl and tl > 0:
+            wc = ca - cl
+            altman_z = (3.25 + 6.56 * (wc / ta) + 3.26 * (re / ta)
+                        + 6.72 * (op_income / ta) + 1.05 * (equity / tl))
+
+    share_change_yoy = None
+    if shares is not None and prev is not None:
+        ps = prev.get("shares")
+        if ps and ps > 0:
+            share_change_yoy = (shares - ps) / ps
+
+    f_score = _piotroski(cur, prev)
 
     return FundamentalsBundle(
         available=True,
@@ -102,7 +155,57 @@ def _signals_from_rows(rows: list[dict]) -> FundamentalsBundle:
         four_quarters_all_loss=four_q_all_loss,
         capital_impairment=capital_impairment,
         periods=len(rows),
+        f_score=f_score,
+        altman_z=altman_z,
+        accrual_ratio=accrual_ratio,
+        gross_profitability=gross_profitability,
+        share_change_yoy=share_change_yoy,
     )
+
+
+def _piotroski(cur: dict, prev: Optional[dict]) -> Optional[int]:
+    """Piotroski F-score from current + year-ago rows.
+
+    Counts the 9 binary signals where inputs exist; if at least 5 are evaluable,
+    normalizes earned/evaluable to a 0-9 scale so partial data (e.g. financials
+    without a current ratio) isn't unfairly penalized. None when too sparse.
+    """
+    def _ratio(row, num, den):
+        if row is None:
+            return None
+        a, b = row.get(num), row.get(den)
+        return (a / b) if (a is not None and b and b > 0) else None
+
+    ni, cfo = cur.get("net_income"), cur.get("op_cash_flow")
+    roa_c = _ratio(cur, "net_income", "total_assets")
+    roa_p = _ratio(prev, "net_income", "total_assets")
+    lev_c = _ratio(cur, "total_debt", "total_assets")
+    lev_p = _ratio(prev, "total_debt", "total_assets")
+    cur_c = _ratio(cur, "current_assets", "current_liabilities")
+    cur_p = _ratio(prev, "current_assets", "current_liabilities")
+    mar_c = _ratio(cur, "gross_profit", "revenue")
+    mar_p = _ratio(prev, "gross_profit", "revenue")
+    to_c = _ratio(cur, "revenue", "total_assets")
+    to_p = _ratio(prev, "revenue", "total_assets")
+    sh_c = cur.get("shares")
+    sh_p = prev.get("shares") if prev else None
+
+    signals: list[bool] = []
+    if roa_c is not None:                         signals.append(roa_c > 0)          # 1 profitability
+    if cfo is not None:                           signals.append(cfo > 0)            # 2 cash flow
+    if roa_c is not None and roa_p is not None:   signals.append(roa_c > roa_p)      # 3 ΔROA
+    if cfo is not None and ni is not None:         signals.append(cfo > ni)           # 4 accrual quality
+    if lev_c is not None and lev_p is not None:   signals.append(lev_c < lev_p)      # 5 Δleverage
+    if cur_c is not None and cur_p is not None:   signals.append(cur_c > cur_p)      # 6 Δliquidity
+    if sh_c is not None and sh_p is not None:     signals.append(sh_c <= sh_p)       # 7 no dilution
+    if mar_c is not None and mar_p is not None:   signals.append(mar_c > mar_p)      # 8 Δmargin
+    if to_c is not None and to_p is not None:     signals.append(to_c > to_p)        # 9 Δturnover
+
+    evaluable = len(signals)
+    if evaluable < 5:
+        return None
+    earned = sum(1 for s in signals if s)
+    return round(earned * 9 / evaluable)
 
 
 # --------------------------------------------------------------------------- #
@@ -123,13 +226,23 @@ def _fetch_us(ticker: str) -> list[dict]:
     tk = yf.Ticker(ticker)
     inc = tk.quarterly_income_stmt
     bs = tk.quarterly_balance_sheet
+    try:
+        cf = tk.quarterly_cashflow
+    except Exception:  # noqa: BLE001 — cash flow is optional (accruals/F-score degrade)
+        cf = None
     if inc is None or inc.empty:
         return []
     rev = _series_row(inc, "Total Revenue", "Operating Revenue")
     opi = _series_row(inc, "Operating Income", "Total Operating Income As Reported")
     ni = _series_row(inc, "Net Income", "Net Income Common Stockholders")
+    gp = _series_row(inc, "Gross Profit")
     debt = _series_row(bs, "Total Debt")
     eq = _series_row(bs, "Stockholders Equity", "Common Stock Equity")
+    ta = _series_row(bs, "Total Assets")
+    ca = _series_row(bs, "Current Assets", "Total Current Assets")
+    cl = _series_row(bs, "Current Liabilities", "Total Current Liabilities")
+    re = _series_row(bs, "Retained Earnings")
+    ocf = _series_row(cf, "Operating Cash Flow", "Cash Flow From Continuing Operating Activities")
     # shares outstanding -> price-based market cap (yfinance .info/.fast_info are
     # blocked on datacenter IPs, but the balance sheet endpoint works there)
     shr = _series_row(bs, "Ordinary Shares Number", "Share Issued")
@@ -150,6 +263,12 @@ def _fetch_us(ticker: str) -> list[dict]:
             "total_debt": val(debt, col),
             "total_equity": val(eq, col),
             "shares": val(shr, col),
+            "op_cash_flow": val(ocf, col),
+            "gross_profit": val(gp, col),
+            "current_assets": val(ca, col),
+            "current_liabilities": val(cl, col),
+            "total_assets": val(ta, col),
+            "retained_earnings": val(re, col),
         })
     return [r for r in rows
             if any(r[k] is not None for k in ("revenue", "op_income", "net_income", "total_equity"))]
@@ -169,6 +288,14 @@ _DART_ACCOUNT_IDS = {
     "net_income": ("ifrs-full_ProfitLoss", "ifrs_ProfitLoss"),
     "total_debt": ("ifrs-full_Liabilities", "ifrs_Liabilities"),
     "total_equity": ("ifrs-full_Equity", "ifrs_Equity", "ifrs-full_EquityAttributableToOwnersOfParent"),
+    # extras for Piotroski / Altman / accruals / gross-profitability
+    "total_assets": ("ifrs-full_Assets",),
+    "current_assets": ("ifrs-full_CurrentAssets",),
+    "current_liabilities": ("ifrs-full_CurrentLiabilities",),
+    "retained_earnings": ("ifrs-full_RetainedEarnings",),
+    "gross_profit": ("ifrs-full_GrossProfit",),
+    "cogs": ("ifrs-full_CostOfSales",),
+    "op_cash_flow": ("ifrs-full_CashFlowsFromUsedInOperatingActivities",),
 }
 _DART_ACCOUNT_NAMES = {
     "revenue": ("수익(매출액)", "매출액", "영업수익"),
@@ -176,6 +303,13 @@ _DART_ACCOUNT_NAMES = {
     "net_income": ("당기순이익", "당기순이익(손실)", "분기순이익"),
     "total_debt": ("부채총계",),
     "total_equity": ("자본총계",),
+    "total_assets": ("자산총계",),
+    "current_assets": ("유동자산",),
+    "current_liabilities": ("유동부채",),
+    "retained_earnings": ("이익잉여금", "이익잉여금(결손금)", "결손금"),
+    "gross_profit": ("매출총이익", "매출총이익(손실)"),
+    "cogs": ("매출원가",),
+    "op_cash_flow": ("영업활동현금흐름", "영업활동으로인한현금흐름", "영업활동으로 인한 현금흐름"),
 }
 
 
@@ -305,13 +439,28 @@ def _row_from_report(report: list[dict], year: int, reprt: str) -> dict:
     def amt(field: str):
         it = _pick(report, field)
         return it["thstrm"] if it else None
+    revenue = amt("revenue")
+    gross_profit = amt("gross_profit")
+    if gross_profit is None:  # fall back to revenue - cost of sales
+        cogs = amt("cogs")
+        if revenue is not None and cogs is not None:
+            gross_profit = revenue - cogs
     return {
         "period": f"{year}-{_REPRT_MONTH_DAY.get(reprt, '12-31')}",
-        "revenue": amt("revenue"),
+        "revenue": revenue,
         "op_income": amt("op_income"),
         "net_income": amt("net_income"),
         "total_debt": amt("total_debt"),
         "total_equity": amt("total_equity"),
+        "total_assets": amt("total_assets"),
+        "current_assets": amt("current_assets"),
+        "current_liabilities": amt("current_liabilities"),
+        "retained_earnings": amt("retained_earnings"),
+        "gross_profit": gross_profit,
+        "op_cash_flow": amt("op_cash_flow"),
+        # KR shares outstanding isn't in fnlttSinglAcntAll; left None (share
+        # issuance / price-based cap stay US-only until a KR shares source lands).
+        "shares": None,
     }
 
 
@@ -359,10 +508,14 @@ def _load_cached(conn, ticker: str) -> Optional[list[dict]]:
     if fetched and (date.today() - fetched).days > REFRESH_DAYS:
         return None  # stale
     cur = conn.execute(
-        "SELECT period, revenue, op_income, net_income, total_debt, total_equity "
+        "SELECT period, revenue, op_income, net_income, total_debt, total_equity, shares, "
+        "op_cash_flow, gross_profit, current_assets, current_liabilities, "
+        "total_assets, retained_earnings "
         "FROM fundamentals WHERE ticker=? ORDER BY period DESC", (ticker,)
     )
-    cols = ("period", "revenue", "op_income", "net_income", "total_debt", "total_equity")
+    cols = ("period", "revenue", "op_income", "net_income", "total_debt", "total_equity",
+            "shares", "op_cash_flow", "gross_profit", "current_assets",
+            "current_liabilities", "total_assets", "retained_earnings")
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
@@ -370,10 +523,15 @@ def _save(conn, ticker: str, rows: list[dict]) -> None:
     now = db_mod.now_iso()
     conn.executemany(
         "INSERT OR REPLACE INTO fundamentals"
-        "(ticker, period, revenue, op_income, net_income, total_debt, total_equity, shares, fetched_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?)",
+        "(ticker, period, revenue, op_income, net_income, total_debt, total_equity, shares,"
+        " op_cash_flow, gross_profit, current_assets, current_liabilities,"
+        " total_assets, retained_earnings, fetched_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [(ticker, r["period"], r.get("revenue"), r.get("op_income"), r.get("net_income"),
-          r.get("total_debt"), r.get("total_equity"), r.get("shares"), now) for r in rows],
+          r.get("total_debt"), r.get("total_equity"), r.get("shares"),
+          r.get("op_cash_flow"), r.get("gross_profit"), r.get("current_assets"),
+          r.get("current_liabilities"), r.get("total_assets"), r.get("retained_earnings"),
+          now) for r in rows],
     )
     conn.commit()
 

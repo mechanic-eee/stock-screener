@@ -25,11 +25,8 @@
   - [x] **ATR 리스크/손절 지표 추가**(indicators.atr + scoring.atr_risk_score + filters/atr_risk.py). 비어있던 리스크/사이징 차원 첫 입력. 후속: to_watchlist 손절 자동초안.
   - [x] **drawdown 기본 −80→−50 통일** + **Actions 캐시키 고정**(screener-db-v1) — 캐시키는 commit+push 필요.
   - [x] **[P0] kr_market_action** — KR 관리종목/투자주의환기 게이트(`data/market_actions.py`+universe). FDR ADMINISTRATIVE+KRX Dept, 일일캐시·fail-soft. **라이브 144종목 차단 검증.**
-  - [ ] **[P0] altman_z (Z'')** — 부도위험. ★게이트는 OFF로 출시(스코어러만)→백테스트 후 게이트화(적자기업 부호 가드 §6).
-  - [ ] **[P0] piotroski_fscore** — FundamentalsBundle 4곳 라운드트립 확장(§6 무음먹통 주의) + KR CFO 매핑(신규작업). accruals·GP·altman과 1 PR.
-  - [ ] **[P0] net_share_issuance** — 희석/자사주. KR shares 수집 선결.
+  - [x] **[P0] 펀더 묶음 1 PR (Altman Z''·Piotroski F·accruals·gross_profit·발행주식수)** — FundamentalsBundle 4곳 라운드트립(db SCHEMA+migrate / _save / _load_cached / snapshot 사이드카) 원자처리 + KR DART CFO/총자산/유동자산/이익잉여금/매출원가 매핑 추가. 부호 가드(적자기업 None 폴백), Altman 게이트 OFF(스코어러만, 백테스트 후 게이트화). **실데이터 검증: CRL/AHCO 전신호·FLG(은행) fail-soft·SQLite/사이드카 라운드트립 보존·엔진 5필터 동작.** (KR shares는 DART 재무제표 밖 → share_issuance는 현재 US만)
   - [ ] **[P0] 헬스 dead-man-switch** — data/health.json + 신선도 배너 + Actions fail 텔레그램 핑.
-  - [ ] **[P1] accruals_quality · gross_profitability** — P0 fetch에 묶어 동시(한계비용 0).
   - [ ] **[P1] dart_risk_event** — 감사의견 비적정·위험공시(기존 DART 인프라 재사용).
   - [ ] **[P1] fundamental 치명/약신호 분리** + KR shares·4Q적자 작동 수정 / 점수분해·면책 UI / 의존성 핀 / **backtest 실데이터 confirm(캘리브레이션 선결)**.
   - [ ] **[P1] 유동성(거래대금) 하한** — base/universe is_excluded(가장 값싼 1차 컷, atr보다 먼저).

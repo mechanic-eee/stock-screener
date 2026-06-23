@@ -127,6 +127,13 @@ class FundamentalsBundle:
     four_quarters_all_loss: bool = False
     capital_impairment: bool = False  # equity <= 0
     periods: int = 0
+    # Extra derived signals (added 2026-06; None when inputs are missing so the
+    # dependent filters fall back to neutral/available=False — never excluded).
+    f_score: Optional[int] = None            # Piotroski 0-9 (financial-strength trend)
+    altman_z: Optional[float] = None         # Altman Z'' (bankruptcy distance, emerging-mkt)
+    accrual_ratio: Optional[float] = None    # (NI - CFO) / assets; lower = cleaner earnings
+    gross_profitability: Optional[float] = None  # gross profit / assets (clean quality)
+    share_change_yoy: Optional[float] = None     # shares YoY; +dilution / -buyback
 
 
 @dataclass

@@ -97,6 +97,12 @@ CREATE TABLE IF NOT EXISTS fundamentals (
   total_debt REAL,
   total_equity REAL,
   shares REAL,                       -- shares outstanding (for price-based market cap)
+  op_cash_flow REAL,                 -- operating cash flow (F-score, accruals)
+  gross_profit REAL,                 -- gross profit (quality, F-score margin)
+  current_assets REAL,               -- F-score current ratio, Altman WC/TA
+  current_liabilities REAL,
+  total_assets REAL,                 -- Altman, accruals, GP/assets, ROA
+  retained_earnings REAL,            -- Altman RE/TA
   fetched_at TEXT,
   PRIMARY KEY (ticker, period)
 );
@@ -145,6 +151,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     fcols = {r[1] for r in conn.execute("PRAGMA table_info(fundamentals)")}
     if "shares" not in fcols:
         conn.execute("ALTER TABLE fundamentals ADD COLUMN shares REAL")
+    # 2026-06: columns for Piotroski / Altman / accruals / gross-profitability.
+    for col in ("op_cash_flow", "gross_profit", "current_assets",
+                "current_liabilities", "total_assets", "retained_earnings"):
+        if col not in fcols:
+            conn.execute(f"ALTER TABLE fundamentals ADD COLUMN {col} REAL")
 
 
 _initialized: set[str] = set()

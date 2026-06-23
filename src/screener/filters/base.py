@@ -45,4 +45,4 @@ def load_all() -> None:
     """
     from . import (drawdown, macd, weekly_macd, rsi, volume, moving_average,  # noqa: F401
                    bollinger, obv, vcp, rs, fundamental, valuation, catalyst, news,
-                   atr_risk)
+                   atr_risk, piotroski, altman_z, accruals, gross_profit, share_issuance)

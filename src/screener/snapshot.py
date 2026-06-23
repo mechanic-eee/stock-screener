@@ -281,10 +281,13 @@ def export_fundamentals(
         "debt_to_equity": fb.debt_to_equity,
         "four_quarters_all_loss": bool(fb.four_quarters_all_loss),
         "capital_impairment": bool(fb.capital_impairment), "periods": int(fb.periods),
+        "f_score": fb.f_score, "altman_z": fb.altman_z, "accrual_ratio": fb.accrual_ratio,
+        "gross_profitability": fb.gross_profitability, "share_change_yoy": fb.share_change_yoy,
     } for c, fb in pairs]
     out = pd.DataFrame(rows, columns=[
         "ticker", "available", "revenue_yoy", "op_margin", "debt_to_equity",
-        "four_quarters_all_loss", "capital_impairment", "periods"])
+        "four_quarters_all_loss", "capital_impairment", "periods",
+        "f_score", "altman_z", "accrual_ratio", "gross_profitability", "share_change_yoy"])
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(path, index=False)
@@ -317,6 +320,8 @@ def load_fundamentals(source: Optional[str | Path] = None) -> dict:
         return {}
     out = {}
     for r in df.itertuples(index=False):
+        # getattr fallbacks keep older sidecars (without the 2026-06 columns) loadable
+        fs = getattr(r, "f_score", None)
         out[str(r.ticker)] = FundamentalsBundle(
             available=bool(r.available),
             revenue_yoy=_opt_float(r.revenue_yoy), op_margin=_opt_float(r.op_margin),
@@ -324,6 +329,11 @@ def load_fundamentals(source: Optional[str | Path] = None) -> dict:
             four_quarters_all_loss=bool(r.four_quarters_all_loss),
             capital_impairment=bool(r.capital_impairment),
             periods=int(r.periods) if not pd.isna(r.periods) else 0,
+            f_score=None if (fs is None or pd.isna(fs)) else int(fs),
+            altman_z=_opt_float(getattr(r, "altman_z", None)),
+            accrual_ratio=_opt_float(getattr(r, "accrual_ratio", None)),
+            gross_profitability=_opt_float(getattr(r, "gross_profitability", None)),
+            share_change_yoy=_opt_float(getattr(r, "share_change_yoy", None)),
         )
     return out
 
