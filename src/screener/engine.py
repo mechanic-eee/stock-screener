@@ -101,6 +101,11 @@ def apply_filters(
     results: list[dict] = []
     for data in candidates:
         base_out = base.apply(data, base_params)
+        # The base drawdown is a live gate here too, not just a scorer: a snapshot
+        # is pre-screened at the loosest threshold (-50%), so tightening the UI
+        # slider (e.g. to -85%) must actually drop the shallower-drawdown names.
+        if not base_out.passed:
+            continue
         row = {
             "ticker": data.ticker,
             "name": data.name,
