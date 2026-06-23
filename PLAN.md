@@ -5,6 +5,7 @@
 **현재 상태: 클라우드 배포 완료 + enrichment·뉴스 실사용화 완료** — GitHub(mechanic-eee/stock-screener) + Actions 일일 스캔(평일 22:00 UTC → data 브랜치 스냅샷) + Streamlit Cloud 호스팅(비번 보호). 로컬은 run_app.bat / 바탕화면 아이콘.
 - (2026-05-25 기준) 4개 enrichment(KR/US 밸류·펀더 + RS) 전부 클라우드 스냅샷 prime으로 작동(US 밸류는 .info/fast_info 차단 우회=종가×재무제표 주식수). 뉴스 필터 실사용화: 일일 캐시 + 네이버 KR/NewsAPI US, 호스팅 KR 검증완료. 스크리너→stock-investing 워치리스트 연결(scripts/to_watchlist.py, 지표가중 랭킹). 보조지표 사용법 docs/indicator-guide.md.
 - **다음 세션 후보(전부 선택 백로그):** ③감성모델 교체(KR-FinBERT, 클라우드 부담으로 보류) / LLM 뉴스분류(유료키) / US 뉴스 NEWSAPI_KEY 발급 / 전종목 스캔 런타임 튜닝 / 워치리스트 자동초안 큐레이션.
+- **(2026-06-23) 멀티에이전트 감사·리서치·검증 → 최적화 설계 수립:** `docs/service-design-2026-06-23.md`. 핵심: ①데이터백본 정상(5/24 멈춤은 로컬 ref stale 오진단, 원격 신선) ②점수모델 빈 차원=이익의질·부도위험·퀄리티 ③news 0.30 미스배분. 추가 9종(F-score·Altman Z''·발행주식수·관리종목게이트·accruals·GP·DART위험공시·ATR·KR수급) / 삭제후보 5건(확인 필요) / 개선 9건.
 
 ## 다음 할 일
 - [x] 아키텍처 결정 (수집/필터링 분리, 플러그인 필터, 뉴스 마지막)
@@ -20,6 +21,21 @@
 - [x] 종목유형 분류 정밀도 개선(US): "Trust" 운영사/REIT→보통주(fund 오분류 해결), 채권성(Senior/Subordinated Notes)→fund 분리, 클래스주(BRK.A) 보통주 유지(티커 '.' 규칙 제거), UiPath etn 오탐 수정(브랜드명 단어경계). 단 US ETN은 NASDAQ 심볼파일이 식별정보 미제공으로 여전히 탐지 거의 0(오탐은 없음) — 정밀 ETN 분류는 별도 데이터소스 필요(백로그).
 - [x] **[지표고도화] 보조지표 4종 추가** — 상대강도(RS, 시장 대비 초과수익) · OBV 누적매집 · VCP 변동성수축(베이스) · 밸류에이션(PER/PBR/ROE/배당). 절대신호 위주였던 셋에 상대성과·매집·바닥구조·저평가 차원 보강. 총 보조지표 13종. (다음 후보: ATR 손절/사이징, ADX 추세강도, 200DMA 회복, 섹터 상대강도)
 - [ ] 감성 스코어러 모델 교체 검토 (KR-FinBERT 등)
+- **[2026-06-23 최적화 로드맵 — `docs/service-design-2026-06-23.md`]**
+  - [x] **ATR 리스크/손절 지표 추가**(indicators.atr + scoring.atr_risk_score + filters/atr_risk.py). 비어있던 리스크/사이징 차원 첫 입력. 후속: to_watchlist 손절 자동초안.
+  - [x] **drawdown 기본 −80→−50 통일** + **Actions 캐시키 고정**(screener-db-v1) — 캐시키는 commit+push 필요.
+  - [x] **[P0] kr_market_action** — KR 관리종목/투자주의환기 게이트(`data/market_actions.py`+universe). FDR ADMINISTRATIVE+KRX Dept, 일일캐시·fail-soft. **라이브 144종목 차단 검증.**
+  - [ ] **[P0] altman_z (Z'')** — 부도위험. ★게이트는 OFF로 출시(스코어러만)→백테스트 후 게이트화(적자기업 부호 가드 §6).
+  - [ ] **[P0] piotroski_fscore** — FundamentalsBundle 4곳 라운드트립 확장(§6 무음먹통 주의) + KR CFO 매핑(신규작업). accruals·GP·altman과 1 PR.
+  - [ ] **[P0] net_share_issuance** — 희석/자사주. KR shares 수집 선결.
+  - [ ] **[P0] 헬스 dead-man-switch** — data/health.json + 신선도 배너 + Actions fail 텔레그램 핑.
+  - [ ] **[P1] accruals_quality · gross_profitability** — P0 fetch에 묶어 동시(한계비용 0).
+  - [ ] **[P1] dart_risk_event** — 감사의견 비적정·위험공시(기존 DART 인프라 재사용).
+  - [ ] **[P1] fundamental 치명/약신호 분리** + KR shares·4Q적자 작동 수정 / 점수분해·면책 UI / 의존성 핀 / **backtest 실데이터 confirm(캘리브레이션 선결)**.
+  - [ ] **[P1] 유동성(거래대금) 하한** — base/universe is_excluded(가장 값싼 1차 컷, atr보다 먼저).
+  - [ ] **[P2] kr_short_and_flow**(pykrx 공매도·수급) / 회복라벨 IC·IR 가중 재산정+백분위정규화·3축 / 후반부 루프(DECISIONS·사이징·추적리뷰).
+  - [x] **[삭제·강등 — 사용자 승인]** news 0.30→0.10 강등+fail-soft통일(US전체탈락버그 제거) / catalyst 보너스 기본0(경고 유지) / WATCHLIST 11행 '보류'섹션 강등(데이터 보존).
+  - [ ] **[보류 — 백테스트 후]** rsi·bollinger 중복 / moving_average 재정의. (opt-in+런타임정규화라 동시활성 시에만 이중계상 → 증분가치 확인 후 결정)
 - [ ] PRD 미구현분 통합 (추천순 진행 중):
   - [x] **주봉MACD(MTF, §5.4.4)** — 일봉→주봉 리샘플 7-상태 점수, 플러그인 필터(weekly_macd, weight 0.15). 순수 pandas, deadband로 미완성주 가짜크로스 방지.
   - [x] **쿨다운(§5.6)** — cooldown.py + alert_history. 14일 캘린더 쿨다운, +20점 시 재알림. daily_scan 연결.
@@ -41,6 +57,9 @@
 - [ ] 전종목 일일 스캔 런타임/비용 튜닝: 전 유형 KR+US ≈ 1만 종목 → 1.5~2.5h(첫 실행). public이라 분 무제한이나 길면 워런트/유닛 제외 또는 US 주1회 등 고려.
 
 ## 결정 로그
+- (2026-06-23) **최적화는 멀티에이전트 감사·리서치·검증으로 설계 후 단계 적용.** 코드 4영역 감사 + 웹 리서치(팩터투자·전문스크리너·KR데이터·폭락주특화) + 적대적 검증을 병렬로 돌려 `docs/service-design-2026-06-23.md` 수립. 채택 원칙: ①추가는 **직교성+무료데이터+실증근거** 3요건 충족만(MACD/RSI 류 중복 재추천 배제), ②삭제는 바로 안 하고 확인(opt-in+런타임정규화라 rsi/bollinger/ma 이중계상은 동시활성 시에만→백테스트 후 결정), ③신규 펀더지표는 **FundamentalsBundle 4곳 직렬화 라운드트립 무음먹통**(2026-05-24 재발 위험)을 1 PR로 원자처리, ④Altman/F-score는 적자기업 부호 가드 + 게이트는 백테스트 후. trade-off: 선(先)설계로 착수가 늦지만, 미검증 가중치·이중계상·무음먹통을 사전 차단.
+- (2026-06-23) **ATR을 첫 신규지표로 즉시 추가**(외부호출 0·직렬화위험 0·직교차원). 대안: P0 펀더지표부터 → 4곳 라운드트립+KR CFO 매핑 등 선결이 많아 한 턴에 무리. ATR은 일봉 OHLC만으로 자족적이라 '리스크/사이징' 빈 차원을 즉시 채우고 to_watchlist 손절초안으로 발굴→실행을 잇는 가장 깨끗한 착수점. 정보성(weight 0)이라 합성점수 교란 없음.
+- (2026-06-23) **drawdown 기본 −80→−50, Actions 캐시키 run_id→고정.** 전자: daily-scan 운영값(−50)과 코드 default(−80) 불일치로 스냅샷↔로컬 UI가 다른 모집단을 보던 정합성 결함 해소. 후자: run_id 키는 정확매치 영구 miss라 매 런 풀 리페치(런타임 7m↔1h11m 실측 편차) → 고정키로 churn 제거. push 시 반영.
 - (2026-05-23) 인터페이스=Streamlit, 유니버스=KR+US 동시, 뉴스=처음부터. (사용자 선택)
 - (2026-05-23) **수집(배치) vs 필터링(인터랙티브) 분리.** 대안: 매 요청마다 전종목 라이브 조회 → 수천 종목이라 대시보드가 수 분씩 멈춤. 채택: build_candidates가 시세 캐시+기본필터로 후보를 압축, apply_filters는 캐시 후보 위에서 즉시 동작. trade-off: 캐시 신선도 관리 필요(파일 mtime 기반 max_age).
 - (2026-05-23) **지표를 순수 pandas로 자체 구현**(pandas-ta/TA-Lib 미사용). 이유: Python 3.14가 매우 최신이라 바이너리 의존성 휠 공백 위험 + MACD/RSI는 구현이 단순 + 확장 용이. trade-off: 지표 정확성 직접 책임.
