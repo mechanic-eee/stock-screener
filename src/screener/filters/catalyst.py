@@ -70,15 +70,16 @@ register(
     Filter(
         key="catalyst",
         label="카탈리스트(실적)",
-        description="실적발표 임박(7일내) 경고 + 실적 직후 3거래일 내 MACD 전환 시 보너스 점수"
-        "(PRD §5.4.5/§5.5.2). 제외하지 않는 보너스 필터 — 점수에 가산(합계 100 초과 가능). "
+        description="실적발표 임박(7일내) ⚠️ 경고 표시 + (선택)실적 직후 3거래일 내 MACD 전환 보너스. "
+        "보너스는 발동조건이 좁고 yfinance KR 실적 커버리지가 얇아 기본 OFF(0점) — "
+        "임박 경고만 쓰는 정보성 필터. 점수를 켜려면 '보너스 점수' 슬라이더를 올린다. "
         "yfinance 실적일정(US+KR).",
         weight=0.0,
         needs_catalyst=True,
         is_bonus=True,
         params=[
-            Param("bonus", "보너스 점수", "float", default=5.0, min=0.0, max=30.0, step=1.0,
-                  help="실적 직후 MACD 전환 종목에 더할 점수."),
+            Param("bonus", "보너스 점수", "float", default=0.0, min=0.0, max=30.0, step=1.0,
+                  help="실적 직후 MACD 전환 종목에 더할 점수. 기본 0(보너스 끔) — 올리면 가산."),
             Param("warn_days", "임박 경고 일수", "int", default=7, min=1, max=30, step=1,
                   help="다음 실적이 이 일수(달력) 이내면 ⚠️ 표시."),
             Param("post_days", "실적후 전환 허용 거래일", "int", default=3, min=1, max=10, step=1,
