@@ -56,3 +56,4 @@
 ## [2026-06-23] stock-screener | work | [P0] 헬스 dead-man-switch: snapshot.export_health→data/health.json + daily_scan 발행 + daily-scan.yml data브랜치 publish·Actions 실패 텔레그램 핑 + app 신선도 배너(5일↑ 경고+gh run/git fetch 진단안내). 라운드트립 검증.
 ## [2026-06-23] stock-screener | work | [P1] backtest 실데이터 첫 실행(US 6111·KR 1635, 5년 OFAT). docs/backtest-findings-2026-06-23.md. 절대수치 신뢰불가(US +118%=생존편향·잡주, Sharpe 0.02). 방향: 맨몸게이트 승률<50%→enrichment 필수, US 유동성하한 시급, −50 방어가능, 임계튜닝 보류(과최적화 회피).
 ## [2026-06-23] stock-screener | fix | 기본 하락률 슬라이더가 결과 건수를 안 바꾸던 버그: apply_filters가 base drawdown을 스코어러로만 쓰고 게이트로 안 써서 임계 올려도 종목 안 빠짐 → base_out.passed False면 drop 추가. 슬라이더 스텝 5단위(min_drop), years는 1년 단위 확인. 검증: 85%→71·90%→31종목.
+## [2026-06-23] stock-screener | work | 앱 UX: 메인에 점수 산정·보조지표 사용법 info 패널(expander) 추가 + 보조지표 사이드바 순서를 중요도순(_DISPLAY_ORDER: 펀더·부도·퀄리티→모멘텀/수급→리스크→확증) 정렬 + indicator-guide.md 최신화(신규 6지표·가중치 반영).
