@@ -34,6 +34,11 @@ VAL_PATH = ROOT / "data" / "valuations.parquet"
 VAL_NAME = "valuations.parquet"
 FUND_PATH = ROOT / "data" / "fundamentals.parquet"
 FUND_NAME = "fundamentals.parquet"
+# Health sidecar: a tiny JSON the daily scan writes so the app (and a human) can
+# tell a *succeeded-but-stale* run from a healthy one. A green Actions run only
+# means the script didn't crash, not that the data is fresh.
+HEALTH_PATH = ROOT / "data" / "health.json"
+HEALTH_NAME = "health.json"
 
 
 def export_candidates(candidates: list[TickerData], path: str | Path = DEFAULT_PATH) -> Path:
@@ -356,3 +361,71 @@ def prime_fundamentals(source: Optional[str | Path] = None) -> dict:
     if m:
         fundamentals_mod.prime(m)
     return m
+
+
+# --------------------------------------------------------------------------- #
+# Health / freshness (dead-man-switch)
+# --------------------------------------------------------------------------- #
+def _avail_ratio(path: Path) -> Optional[float]:
+    """Fraction of a sidecar's rows with available=True (None if unreadable)."""
+    try:
+        if not Path(path).exists():
+            return None
+        df = pd.read_parquet(path)
+        if df.empty or "available" not in df.columns:
+            return None
+        return round(float(df["available"].mean()), 3)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def export_health(candidates: list[TickerData], markets: list[str],
+                  path: str | Path = HEALTH_PATH) -> Path:
+    """Write a small health.json next to the snapshot.
+
+    Captures what a green-but-stale run can't tell you: when the scan actually
+    ran, how many candidates it found, the latest price date in the snapshot, and
+    how much of the enrichment came back usable. The app reads this to warn when
+    the data is old even though the workflow 'succeeded'.
+    """
+    from datetime import datetime, timezone
+
+    last_price = None
+    for c in candidates:
+        if c.prices is not None and not c.prices.empty:
+            d = pd.Timestamp(c.prices.index.max()).date().isoformat()
+            if last_price is None or d > last_price:
+                last_price = d
+
+    health = {
+        "last_run_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "markets": list(markets),
+        "base_survivors": len(candidates),
+        "snapshot_tickers": len(candidates),
+        "last_price_date": last_price,
+        "fundamentals_available": _avail_ratio(FUND_PATH),
+        "valuations_available": _avail_ratio(VAL_PATH),
+    }
+    import json
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(health, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def load_health(source: Optional[str | Path] = None) -> dict:
+    """Load the health sidecar that sits next to the candidates snapshot ({} if absent)."""
+    import json
+
+    src = _sibling(source, HEALTH_NAME)
+    try:
+        if src.startswith("http://") or src.startswith("https://"):
+            import requests
+            resp = requests.get(src, timeout=30)
+            resp.raise_for_status()
+            return json.loads(resp.content)
+        if Path(src).exists():
+            return json.loads(Path(src).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    return {}

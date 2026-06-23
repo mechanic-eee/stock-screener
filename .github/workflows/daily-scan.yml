@@ -76,6 +76,7 @@ jobs:
           for f in benchmarks valuations fundamentals; do
             cp "data/$f.parquet" "$RUNNER_TEMP/$f.parquet" 2>/dev/null || true
           done
+          cp data/health.json "$RUNNER_TEMP/health.json" 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan data
@@ -88,5 +89,25 @@ jobs:
               git add "$f.parquet"
             fi
           done
+          if [ -f "$RUNNER_TEMP/health.json" ]; then
+            cp "$RUNNER_TEMP/health.json" health.json
+            git add health.json
+          fi
           git commit -m "snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push -f origin data
+
+      # Dead-man-switch: a scheduled run can fail silently (cron disabled, secret
+      # expired, dependency break). Ping Telegram on any failure so a stalled
+      # pipeline is noticed instead of just going quiet.
+      - name: Notify on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+              --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+              --data-urlencode "text=⚠️ 폭락주 일일 스캔 실패 — $url" >/dev/null || true
+          fi

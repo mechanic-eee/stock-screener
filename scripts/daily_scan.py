@@ -87,6 +87,12 @@ def main() -> int:
             cands, types=args.enrich_types, max_workers=args.enrich_workers, progress_cb=ecb)
         print(f"valuation snapshot: {val_path}", flush=True)
 
+    # health sidecar (dead-man-switch): lets the app/human tell a succeeded-but-
+    # stale run from a healthy one. Written after the sidecars so its available
+    # ratios reflect this run.
+    health_path = snapshot.export_health(cands, args.markets)
+    print(f"health written: {health_path}", flush=True)
+
     # rank by base score for the alert
     rows = engine.apply_filters(cands, base_params=base, selected={})
 

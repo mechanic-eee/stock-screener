@@ -88,6 +88,50 @@ def _to_csv(rows: list[dict]) -> str:
     return buf.getvalue()
 
 
+def _freshness_banner(source) -> None:
+    """Dead-man-switch banner: surface a succeeded-but-stale snapshot.
+
+    A green Actions run only means the script didn't crash. This reads the
+    health sidecar (falling back to snapshot meta) and shows a loud warning when
+    the price data is old, with how to diagnose it.
+    """
+    from datetime import date
+
+    h = snapshot.load_health(source)
+    last_run = h.get("last_run_utc")
+    last_price = h.get("last_price_date") or snapshot.snapshot_meta(source).get("last_date")
+
+    stale_days = None
+    if last_price:
+        try:
+            stale_days = (date.today() - date.fromisoformat(str(last_price)[:10])).days
+        except ValueError:
+            pass
+
+    parts = []
+    if last_run:
+        parts.append(f"마지막 스캔 {str(last_run)[:16]}Z")
+    if last_price:
+        parts.append(f"시세 {last_price}")
+    if h.get("snapshot_tickers") is not None:
+        parts.append(f"{h['snapshot_tickers']}종목")
+    fa, va = h.get("fundamentals_available"), h.get("valuations_available")
+    if fa is not None:
+        parts.append(f"펀더 {fa:.0%}")
+    if va is not None:
+        parts.append(f"밸류 {va:.0%}")
+    info = " · ".join(parts)
+
+    if stale_days is not None and stale_days > 5:
+        st.error(
+            f"⚠️ 스냅샷이 오래됐습니다 — 마지막 시세가 {stale_days}일 전. 일일 스캔이 멈췄을 수 "
+            f"있어요. 진단: `gh run list`(Actions 성공 여부) · `git fetch origin data`(원격 신선도). "
+            + (f"\n\n{info}" if info else "")
+        )
+    elif info:
+        st.caption(f"🟢 {info}")
+
+
 def render_param(p: Param, key_prefix: str):
     wkey = f"{key_prefix}.{p.key}"
     if p.kind == "int":
@@ -255,6 +299,9 @@ if (any(get(k).needs_fundamentals for k in selected)
 # ---- Main ----
 st.title("📉 5년 고가 대비 폭락주 스크리너")
 st.caption("기본: 종가 기준 N년 최고가 대비 하락률 ≥ 임계. 보조지표는 사이드바에서 켜고 값 조정.")
+
+if not live_mode:
+    _freshness_banner(SNAP_URL or None)
 
 if not cands:
     if live_mode:

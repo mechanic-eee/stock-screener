@@ -53,3 +53,4 @@
 ## [2026-06-23] stock-screener | fix | [강등·사용자승인] news 0.30→0.10+fail-soft(데이터없음→중립50·available=F, US 전체탈락버그 제거) / catalyst 보너스 기본0(임박경고 유지) / WATCHLIST 11행 보류섹션 강등(데이터 보존)
 ## [2026-06-23] stock-screener | work | 통합 스모크: 15필터 로드·atr_risk 동작·news fail-soft 행생존(diag[1,1])·KR admin 게이트 e2e 전부 통과. 보류: rsi/bollinger/MA 중복은 백테스트 후.
 ## [2026-06-23] stock-screener | work | [추가/P0] 펀더 묶음 5필터(Altman Z''·Piotroski F·accruals·gross_profit·발행주식수) + FundamentalsBundle 4곳 라운드트립 원자처리 + KR DART CFO/총자산/유동자산/이익잉여금 매핑. 실데이터 검증(CRL/AHCO 전신호·FLG fail-soft·라운드트립 보존·엔진 동작).
+## [2026-06-23] stock-screener | work | [P0] 헬스 dead-man-switch: snapshot.export_health→data/health.json + daily_scan 발행 + daily-scan.yml data브랜치 publish·Actions 실패 텔레그램 핑 + app 신선도 배너(5일↑ 경고+gh run/git fetch 진단안내). 라운드트립 검증.
