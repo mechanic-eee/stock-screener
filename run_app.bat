@@ -11,6 +11,11 @@ REM ===========================================================
 cd /d "%~dp0"
 set PYTHONUTF8=1
 
+REM Load the fresh daily-scanned candidates (KR + US) from the cloud data branch
+REM so a double-click always shows the latest snapshot without a local scan.
+REM (You can still switch to "live scan" in the sidebar.)
+set SNAPSHOT_URL=https://raw.githubusercontent.com/mechanic-eee/stock-screener/data/candidates.parquet
+
 if not exist ".venv\Scripts\python.exe" (
   echo [ERROR] .venv not found. Run these once first:
   echo    python -m venv .venv
