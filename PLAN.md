@@ -27,7 +27,9 @@
   - [x] **[P0] kr_market_action** — KR 관리종목/투자주의환기 게이트(`data/market_actions.py`+universe). FDR ADMINISTRATIVE+KRX Dept, 일일캐시·fail-soft. **라이브 144종목 차단 검증.**
   - [x] **[P0] 펀더 묶음 1 PR (Altman Z''·Piotroski F·accruals·gross_profit·발행주식수)** — FundamentalsBundle 4곳 라운드트립(db SCHEMA+migrate / _save / _load_cached / snapshot 사이드카) 원자처리 + KR DART CFO/총자산/유동자산/이익잉여금/매출원가 매핑 추가. 부호 가드(적자기업 None 폴백), Altman 게이트 OFF(스코어러만, 백테스트 후 게이트화). **실데이터 검증: CRL/AHCO 전신호·FLG(은행) fail-soft·SQLite/사이드카 라운드트립 보존·엔진 5필터 동작.** (KR shares는 DART 재무제표 밖 → share_issuance는 현재 US만)
   - [x] **[P0] 헬스 dead-man-switch** — `snapshot.export_health`→`data/health.json`(last_run·last_price_date·survivors·enrich available비율), daily_scan 발행 + daily-scan.yml data브랜치 publish + Actions 실패 시 텔레그램 핑, app 신선도 배너(5일↑ 경고+진단법). 라운드트립 검증.
-  - [~] **[P1] backtest 실데이터 실행** — 로컬 DB 5년치(US 6111·KR 1635종목) → exports/prices_{us,kr}.parquet → calibrate_gates OFAT 실행 중(임계 −50/3/1.5 confirm 목적).
+  - [x] **[P1] backtest 실데이터 실행** — 로컬 5년치(US 6111·KR 1635) OFAT 완료. `docs/backtest-findings-2026-06-23.md`. **결론:** 절대수치 신뢰불가(US +118%=생존편향+잡주 아티팩트, Sharpe 0.02). 방향성: ①맨몸게이트 승률<50%→enrichment 필수 ②US 유동성하한 시급 ③−50 방어가능 ④거래량배수 올리지마. **임계 튜닝은 보류(과최적화 회피)**.
+  - [ ] **[P1·승격, 데이터근거] 유동성/가격 하한** — KR/US 공통 일평균 거래대금+최소가격 floor를 base/universe is_excluded(가격데이터만, fetch 0). 백테스트가 필요성 정량 입증.
+  - [ ] **[P1] 생존편향 보정 백테스트** — KRX-DELISTING(fetch가능)+US 상폐종목 포함 재실행해야 절대수치 의미. 그 전 임계 튜닝 보류.
   - [ ] **[P1] dart_risk_event** — 감사의견 비적정·위험공시(기존 DART 인프라 재사용).
   - [ ] **[P1] fundamental 치명/약신호 분리** + KR shares·4Q적자 작동 수정 / 점수분해·면책 UI / 의존성 핀 / **backtest 실데이터 confirm(캘리브레이션 선결)**.
   - [ ] **[P1] 유동성(거래대금) 하한** — base/universe is_excluded(가장 값싼 1차 컷, atr보다 먼저).

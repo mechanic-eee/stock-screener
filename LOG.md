@@ -54,3 +54,4 @@
 ## [2026-06-23] stock-screener | work | 통합 스모크: 15필터 로드·atr_risk 동작·news fail-soft 행생존(diag[1,1])·KR admin 게이트 e2e 전부 통과. 보류: rsi/bollinger/MA 중복은 백테스트 후.
 ## [2026-06-23] stock-screener | work | [추가/P0] 펀더 묶음 5필터(Altman Z''·Piotroski F·accruals·gross_profit·발행주식수) + FundamentalsBundle 4곳 라운드트립 원자처리 + KR DART CFO/총자산/유동자산/이익잉여금 매핑. 실데이터 검증(CRL/AHCO 전신호·FLG fail-soft·라운드트립 보존·엔진 동작).
 ## [2026-06-23] stock-screener | work | [P0] 헬스 dead-man-switch: snapshot.export_health→data/health.json + daily_scan 발행 + daily-scan.yml data브랜치 publish·Actions 실패 텔레그램 핑 + app 신선도 배너(5일↑ 경고+gh run/git fetch 진단안내). 라운드트립 검증.
+## [2026-06-23] stock-screener | work | [P1] backtest 실데이터 첫 실행(US 6111·KR 1635, 5년 OFAT). docs/backtest-findings-2026-06-23.md. 절대수치 신뢰불가(US +118%=생존편향·잡주, Sharpe 0.02). 방향: 맨몸게이트 승률<50%→enrichment 필수, US 유동성하한 시급, −50 방어가능, 임계튜닝 보류(과최적화 회피).

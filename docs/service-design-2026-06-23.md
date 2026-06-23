@@ -171,4 +171,8 @@
 ### 3차 적용 (P0 펀더멘털 묶음 — 1 PR)
 8. **[추가/P0] Altman Z''·Piotroski F·accruals·gross_profitability·발행주식수** (5개 신규 필터 + `models.FundamentalsBundle` 확장 + `scoring` 곡선 5종). 검증에이전트가 경고한 **4곳 직렬화 라운드트립을 원자처리**: `db.py` SCHEMA(6컬럼+migrate ALTER) → `_save` INSERT → `_load_cached` SELECT → `snapshot.export/load_fundamentals` 사이드카(구 사이드카 getattr 폴백). **KR DART 매핑 추가**: 총자산·유동자산/부채·이익잉여금·매출총이익(매출원가 폴백)·영업활동현금흐름(CFO). 부호 가드: 적자기업에서 분모≤0/입력결측 시 None→available=False(중립50), Altman 게이트는 OFF(스코어러만, min_score 슬라이더로 게이트화). 부분데이터(은행 등)는 Piotroski를 evaluable로 정규화.
    - **실데이터 검증:** CRL(F3·Z''4.91·자사주−1.9%)/AHCO(F5·Z''3.24) 전신호, FLG(은행) Z·GP=None fail-soft, **SQLite·사이드카 라운드트립 derived 신호 100% 보존**(무음먹통 없음), 엔진 5필터 동작·점수 합성.
-   - **남은 것:** KR 발행주식수는 DART 재무제표 밖이라 share_issuance 현재 US만 / Altman·F 임계는 backtest 실데이터 confirm 전까지 이론값 / 헬스 dead-man-switch는 미착수.
+   - **남은 것:** KR 발행주식수는 DART 재무제표 밖이라 share_issuance 현재 US만 / Altman·F 임계는 backtest 실데이터 confirm 전까지 이론값.
+
+### 4차 적용 (헬스 + 백테스트 실데이터)
+9. **[추가/P0] 헬스 dead-man-switch** — `snapshot.export_health`→`data/health.json`(마지막 스캔·시세일·후보수·enrich available비율), daily_scan 발행 + daily-scan.yml data브랜치 publish·**Actions 실패 텔레그램 핑** + app 신선도 배너(시세 5일↑ 경고 + `gh run list`/`git fetch` 진단). '성공'과 '정상'을 분리.
+10. **[검증/P1] backtest 실데이터 실행** — 로컬 5년치(US 6111·KR 1635) OFAT. 상세 `docs/backtest-findings-2026-06-23.md`. **절대수치 신뢰불가**(US 90d +118%=생존편향+유동성하한 부재로 잡주 아티팩트, Sharpe 0.02). **방향성 결론:** ①맨몸 게이트 승률<50%(US 33~40·KR 43~47) → enrichment 필터가 승률의 본령(이번 추가 정당화) ②US 유동성하한 시급(Sharpe~0=노이즈) ③낙폭 −50 방어가능 ④거래량배수 올리면 악화. **임계·가중치 튜닝은 보류**(노이즈·편향 데이터에 과최적화 회피) → 선결: 유동성하한 + 생존편향 보정 백테스트.
