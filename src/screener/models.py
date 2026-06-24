@@ -134,6 +134,9 @@ class FundamentalsBundle:
     accrual_ratio: Optional[float] = None    # (NI - CFO) / assets; lower = cleaner earnings
     gross_profitability: Optional[float] = None  # gross profit / assets (clean quality)
     share_change_yoy: Optional[float] = None     # shares YoY; +dilution / -buyback
+    # KR exchange-confirmed distress (DART), None/False for US:
+    audit_qualified: bool = False            # most recent audit opinion non-적정 (한정/부적정/의견거절)
+    risk_event: Optional[str] = None         # recent 부도/영업정지/회생/채권은행관리 event, else None
 
 
 @dataclass

@@ -288,11 +288,13 @@ def export_fundamentals(
         "capital_impairment": bool(fb.capital_impairment), "periods": int(fb.periods),
         "f_score": fb.f_score, "altman_z": fb.altman_z, "accrual_ratio": fb.accrual_ratio,
         "gross_profitability": fb.gross_profitability, "share_change_yoy": fb.share_change_yoy,
+        "audit_qualified": bool(fb.audit_qualified), "risk_event": fb.risk_event,
     } for c, fb in pairs]
     out = pd.DataFrame(rows, columns=[
         "ticker", "available", "revenue_yoy", "op_margin", "debt_to_equity",
         "four_quarters_all_loss", "capital_impairment", "periods",
-        "f_score", "altman_z", "accrual_ratio", "gross_profitability", "share_change_yoy"])
+        "f_score", "altman_z", "accrual_ratio", "gross_profitability", "share_change_yoy",
+        "audit_qualified", "risk_event"])
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(path, index=False)
@@ -339,6 +341,8 @@ def load_fundamentals(source: Optional[str | Path] = None) -> dict:
             accrual_ratio=_opt_float(getattr(r, "accrual_ratio", None)),
             gross_profitability=_opt_float(getattr(r, "gross_profitability", None)),
             share_change_yoy=_opt_float(getattr(r, "share_change_yoy", None)),
+            audit_qualified=bool(getattr(r, "audit_qualified", False)),
+            risk_event=(lambda v: None if (v is None or (isinstance(v, float) and pd.isna(v)) or v == "") else str(v))(getattr(r, "risk_event", None)),
         )
     return out
 

@@ -160,6 +160,8 @@ def _signals_from_rows(rows: list[dict]) -> FundamentalsBundle:
         accrual_ratio=accrual_ratio,
         gross_profitability=gross_profitability,
         share_change_yoy=share_change_yoy,
+        audit_qualified=bool(cur.get("audit_qualified")),
+        risk_event=(cur.get("risk_event") or None),
     )
 
 
@@ -464,6 +466,61 @@ def _row_from_report(report: list[dict], year: int, reprt: str) -> dict:
     }
 
 
+# KR exchange-confirmed distress signals (DART). These are *facts* (a disclaimed
+# audit opinion or a bankruptcy filing), not estimates — so the fundamental filter
+# treats them as lethal standalone exclusions.
+_BAD_OPINIONS = ("한정", "부적정", "의견거절")
+_RISK_ENDPOINTS = {
+    "dfOcr": "부도", "bsnSp": "영업정지",
+    "ctrcvsBgrq": "회생절차", "bnkMngtPcbg": "채권은행관리",
+}
+
+
+def _dart_audit_opinion(key: str, corp: str) -> bool:
+    """True if the most recent annual audit opinion is non-적정 (한정/부적정/의견거절).
+
+    Checks the latest year with data; fail-soft (no data / error -> False).
+    """
+    import requests
+
+    for yr in (date.today().year - 1, date.today().year - 2):
+        try:
+            r = requests.get(f"{_DART_BASE}/accnutAdtorNmNdAdtOpinion.json",
+                             params={"crtfc_key": key, "corp_code": corp,
+                                     "bsns_year": str(yr), "reprt_code": "11011"}, timeout=20)
+            d = r.json()
+        except Exception:  # noqa: BLE001
+            continue
+        if d.get("status") != "000":
+            continue
+        ops = [str(it.get("adt_opinion") or "") for it in d.get("list", [])]
+        if not ops:
+            continue
+        return any(any(bad in op for bad in _BAD_OPINIONS) for op in ops)  # most recent year decides
+    return False
+
+
+def _dart_risk_events(key: str, corp: str) -> Optional[str]:
+    """Name of a recent (≤1y) 주요사항보고서 distress event, else None. Fail-soft."""
+    import requests
+    from datetime import timedelta
+
+    end = date.today()
+    bgn = end - timedelta(days=365)
+    for ep, label in _RISK_ENDPOINTS.items():
+        try:
+            r = requests.get(f"{_DART_BASE}/{ep}.json",
+                             params={"crtfc_key": key, "corp_code": corp,
+                                     "bgn_de": bgn.strftime("%Y%m%d"), "end_de": end.strftime("%Y%m%d")},
+                             timeout=20)
+            d = r.json()
+        except Exception:  # noqa: BLE001
+            continue
+        if d.get("status") == "000" and d.get("list"):
+            return label
+    return None
+
+
 def _fetch_kr(ticker: str) -> list[dict]:
     key = _dart_key()
     if not key:
@@ -492,6 +549,14 @@ def _fetch_kr(ticker: str) -> list[dict]:
     prior = _dart_report(key, corp, cur_year - 1, cur_rc)
     if prior:
         rows.append(_row_from_report(prior, cur_year - 1, cur_rc))
+
+    # exchange-confirmed distress (annual audit opinion + recent major events).
+    # Best-effort: a failure here must not lose the financial rows above.
+    try:
+        rows[0]["audit_qualified"] = _dart_audit_opinion(key, corp)
+        rows[0]["risk_event"] = _dart_risk_events(key, corp)
+    except Exception as e:  # noqa: BLE001
+        log.warning("DART risk-signal fetch failed %s: %s", ticker, e)
     return rows
 
 
@@ -510,12 +575,13 @@ def _load_cached(conn, ticker: str) -> Optional[list[dict]]:
     cur = conn.execute(
         "SELECT period, revenue, op_income, net_income, total_debt, total_equity, shares, "
         "op_cash_flow, gross_profit, current_assets, current_liabilities, "
-        "total_assets, retained_earnings "
+        "total_assets, retained_earnings, audit_qualified, risk_event "
         "FROM fundamentals WHERE ticker=? ORDER BY period DESC", (ticker,)
     )
     cols = ("period", "revenue", "op_income", "net_income", "total_debt", "total_equity",
             "shares", "op_cash_flow", "gross_profit", "current_assets",
-            "current_liabilities", "total_assets", "retained_earnings")
+            "current_liabilities", "total_assets", "retained_earnings",
+            "audit_qualified", "risk_event")
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
@@ -525,13 +591,14 @@ def _save(conn, ticker: str, rows: list[dict]) -> None:
         "INSERT OR REPLACE INTO fundamentals"
         "(ticker, period, revenue, op_income, net_income, total_debt, total_equity, shares,"
         " op_cash_flow, gross_profit, current_assets, current_liabilities,"
-        " total_assets, retained_earnings, fetched_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " total_assets, retained_earnings, audit_qualified, risk_event, fetched_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [(ticker, r["period"], r.get("revenue"), r.get("op_income"), r.get("net_income"),
           r.get("total_debt"), r.get("total_equity"), r.get("shares"),
           r.get("op_cash_flow"), r.get("gross_profit"), r.get("current_assets"),
           r.get("current_liabilities"), r.get("total_assets"), r.get("retained_earnings"),
-          now) for r in rows],
+          (1 if r.get("audit_qualified") else 0) if r.get("audit_qualified") is not None else None,
+          r.get("risk_event"), now) for r in rows],
     )
     conn.commit()
 

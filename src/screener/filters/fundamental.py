@@ -22,19 +22,28 @@ def _apply(data: TickerData, p: dict) -> FilterOutcome:
         return FilterOutcome(passed=True, detail="재무없음(중립)", value=50.0,
                              score=50.0, available=False)
 
-    violations: list[str] = []
-    if fb.revenue_yoy is not None and fb.revenue_yoy < float(p["rev_yoy_floor"]) / 100.0:
-        violations.append("매출급감")
-    if fb.debt_to_equity is not None and fb.debt_to_equity > float(p["max_d2e"]) / 100.0:
-        violations.append("고부채")
-    if fb.four_quarters_all_loss:
-        violations.append("4Q적자")
+    # Lethal flags = exchange-/audit-confirmed near-certain delisting: exclude
+    # standalone, regardless of min_violations. Soft flags accumulate.
+    lethal: list[str] = []
     if fb.capital_impairment:
-        violations.append("자본잠식")
+        lethal.append("자본잠식")
+    if fb.four_quarters_all_loss:
+        lethal.append("4Q적자")
+    if getattr(fb, "audit_qualified", False):
+        lethal.append("감사의견❌")
+    if getattr(fb, "risk_event", None):
+        lethal.append(str(fb.risk_event))
+
+    soft: list[str] = []
+    if fb.revenue_yoy is not None and fb.revenue_yoy < float(p["rev_yoy_floor"]) / 100.0:
+        soft.append("매출급감")
+    if fb.debt_to_equity is not None and fb.debt_to_equity > float(p["max_d2e"]) / 100.0:
+        soft.append("고부채")
 
     score = scoring.fundamental_score(fb.revenue_yoy, fb.op_margin, fb.debt_to_equity)
     min_v = int(p["min_violations"])
-    excluded = min_v > 0 and len(violations) >= min_v
+    excluded = (bool(p.get("drop_lethal", True)) and bool(lethal)) \
+        or (min_v > 0 and len(soft) >= min_v)
 
     parts: list[str] = []
     if fb.revenue_yoy is not None:
@@ -44,8 +53,9 @@ def _apply(data: TickerData, p: dict) -> FilterOutcome:
     if fb.debt_to_equity is not None:
         parts.append(f"부채{fb.debt_to_equity * 100:.0f}%")
     detail = " ".join(parts) if parts else "재무"
-    if violations:
-        detail += f" ⚠️{'/'.join(violations)}"
+    flags = lethal + soft
+    if flags:
+        detail += f" ⚠️{'/'.join(flags)}"
     detail += f" ({score:.0f})"
 
     return FilterOutcome(passed=not excluded, detail=detail, value=score, score=score)
@@ -55,14 +65,17 @@ register(
     Filter(
         key="fundamental",
         label="펀더멘털",
-        description="재무 가치함정 자동제외 + 점수(PRD §5.4.3). 매출급감/고부채/4Q적자/자본잠식 중 "
-        "min_violations개 이상이면 제외. 재무 데이터 없으면 중립 50점(제외 안 함). "
-        "KR은 DART_API_KEY 필요(없으면 중립), US는 yfinance(키 불요).",
+        description="재무 가치함정 자동제외 + 점수(PRD §5.4.3). **치명 신호**(자본잠식·4Q적자·"
+        "감사의견 비적정·부도/회생 등 DART 이벤트)는 단독 제외, **약신호**(매출급감·고부채)는 "
+        "min_violations개 이상일 때 제외. 재무 없으면 중립 50점. KR은 DART_API_KEY 필요(감사의견·"
+        "위험공시 포함), US는 yfinance.",
         weight=0.25,
         needs_fundamentals=True,
         params=[
-            Param("min_violations", "자동제외 위반 개수", "int", default=2, min=0, max=4, step=1,
-                  help="이 개수 이상의 red flag면 제외. 0이면 제외 안 하고 점수만 기여."),
+            Param("drop_lethal", "치명신호 단독제외", "bool", default=True,
+                  help="자본잠식·4Q적자·감사의견 비적정·부도/회생 등은 단독으로도 제외(상폐 직행 신호)."),
+            Param("min_violations", "약신호 자동제외 개수", "int", default=2, min=0, max=4, step=1,
+                  help="매출급감·고부채 등 약신호가 이 개수 이상이면 제외. 0이면 약신호로는 제외 안 함."),
             Param("rev_yoy_floor", "매출 YoY 하한 %", "float", default=-30.0, min=-90.0, max=0.0, step=5.0,
                   help="최근 분기 매출 YoY가 이 값 미만이면 위반(기본 -30%)."),
             Param("max_d2e", "부채비율 상한 %", "float", default=300.0, min=100.0, max=1000.0, step=50.0,

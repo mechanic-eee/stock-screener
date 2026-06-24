@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS fundamentals (
   current_liabilities REAL,
   total_assets REAL,                 -- Altman, accruals, GP/assets, ROA
   retained_earnings REAL,            -- Altman RE/TA
+  audit_qualified INTEGER,           -- KR DART: non-적정 audit opinion (lethal)
+  risk_event TEXT,                   -- KR DART: 부도/영업정지/회생/채권관리 event
   fetched_at TEXT,
   PRIMARY KEY (ticker, period)
 );
@@ -156,6 +158,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "current_liabilities", "total_assets", "retained_earnings"):
         if col not in fcols:
             conn.execute(f"ALTER TABLE fundamentals ADD COLUMN {col} REAL")
+    if "audit_qualified" not in fcols:
+        conn.execute("ALTER TABLE fundamentals ADD COLUMN audit_qualified INTEGER")
+    if "risk_event" not in fcols:
+        conn.execute("ALTER TABLE fundamentals ADD COLUMN risk_event TEXT")
 
 
 _initialized: set[str] = set()

@@ -31,7 +31,7 @@
   - [x] **[P1] backtest 실데이터 실행** — 로컬 5년치(US 6111·KR 1635) OFAT 완료. `docs/backtest-findings-2026-06-23.md`. **결론:** 절대수치 신뢰불가(US +118%=생존편향+잡주 아티팩트, Sharpe 0.02). 방향성: ①맨몸게이트 승률<50%→enrichment 필수 ②US 유동성하한 시급 ③−50 방어가능 ④거래량배수 올리지마. **임계 튜닝은 보류(과최적화 회피)**.
   - [x] **[P1·승격, 데이터근거] 유동성/가격 하한** — `engine.build_candidates`에 시장별 floor(KR ₩5억/일·₩1000, US $1M/일·$1, 중앙값, fetch 0) + `indicators.median_turnover` + `daily_scan --no-liquidity` + 백테스트 옵션. **검증: US base 90d +118.6%→+6.2%, 승률 37%→45%, Sharpe 0.016→0.092(허수=잡주 확정). US 6111→3699(61%) 통과.** 기본 ON→다음 스캔부터 스냅샷 자동정제.
   - [x] **[P1] 생존편향 보정 백테스트 (KR)** — FDR로 상폐 주권 337종목(40만행) fetch(`fetch_delisted_kr.py`)+상폐인지 전향수익률(`survivorship_check.py`). **KR base: 생존자-only +4.1%→생존자+상폐 +1.6%/40%/Sharpe 0.036(상폐신호 1982건=13%, 그 90d −13.4%/승률27%).** 결론: **맨몸 게이트는 하한+보정 후 사실상 엣지 없음=동전던지기 → enrichment가 승률의 본질** 정량 재확인. US 보정은 보류(yfinance 상폐시세 미제공=무료한계). **임계 튜닝은 계속 보류**(과신 금지).
-  - [ ] **[P1] dart_risk_event** — 감사의견 비적정·위험공시(기존 DART 인프라 재사용).
+  - [x] **[P1] dart_risk_event** — DART 감사의견 비적정(accnutAdtorNmNdAdtOpinion) + 주요사항보고서 위험이벤트(부도/영업정지/회생/채권관리). FundamentalsBundle audit_qualified·risk_event(4곳 라운드트립) + fundamental 필터 **치명(단독제외)/약신호(누적) 분리**. 실 DART 검증: 금양 의견거절→audit_qualified=True→단독제외(min_violations=0에도). KR전용·fail-soft.
   - [ ] **[P1] fundamental 치명/약신호 분리** + KR shares·4Q적자 작동 수정 / 점수분해·면책 UI / 의존성 핀 / **backtest 실데이터 confirm(캘리브레이션 선결)**.
   - [ ] **[P1] 유동성(거래대금) 하한** — base/universe is_excluded(가장 값싼 1차 컷, atr보다 먼저).
   - [ ] **[P2] kr_short_and_flow**(pykrx 공매도·수급) / 회복라벨 IC·IR 가중 재산정+백분위정규화·3축 / 후반부 루프(DECISIONS·사이징·추적리뷰).
