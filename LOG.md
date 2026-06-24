@@ -62,3 +62,5 @@
 ## [2026-06-24] stock-screener | feat | [P1] 생존편향 보정 백테스트(KR): FDR로 상폐 주권 337종목(40만행) fetch + 상폐인지 전향수익률. KR base 생존자-only +4.1%→생존자+상폐 +1.6%/40%/Sharpe0.036(상폐신호 13%, 90d −13.4%). 결론: 맨몸게이트 하한+보정 후 엣지 거의 없음=enrichment가 승률 본질 재확인. US보정 보류(yfinance 상폐시세 미제공).
 ## [2026-06-24] stock-screener | feat | [P1] dart_risk_event: DART 감사의견 비적정(accnutAdtorNmNdAdtOpinion)+주요사항보고서 위험이벤트(부도/영업정지/회생/채권관리). FundamentalsBundle audit_qualified·risk_event 4곳 라운드트립 + fundamental 필터 치명(단독제외)/약신호(누적) 분리. 실DART검증: 금양 의견거절→단독제외. KR전용·fail-soft.
 ## [2026-06-25] stock-screener | feat | [P1] to_watchlist ATR 손절 자동초안: 시드 시 손절셀=close−2.5×ATR 자동채움(--stop-atr-mult)+ATR% 논거. 후보 prices로 계산(fetch 0), CSV는 TBD폴백, 손절≤0이면 TBD. 워치리스트 TBD 방치 해소. dry-run 검증(깨끗한나라우 손절 9144원 등).
+## [2026-06-25] stock-screener | feat | [P1] 점수 분해 UI: 엔진 apply_filters가 행마다 _parts(요소별 점수×가중치→정규화 기여) 노출 + app 메인 점수분해 섹션(종목선택→막대+표). 검증 기여합==점수(49.3). _접두키는 표·CSV 숨김.
+## [2026-06-25] stock-screener | research | [P2] kr_short_and_flow 데이터소스 실측: pykrx 공매도/수급 전부 빈응답(KRX 로그인벽)·KRX OTP CSV 빈응답 → 무료 공매도 소스 없음. 네이버 frgn만 외국인/기관 수급 스크래핑 가능. 사용자 결정으로 보류.

@@ -33,6 +33,8 @@
   - [x] **[P1·승격, 데이터근거] 유동성/가격 하한** — `engine.build_candidates`에 시장별 floor(KR ₩5억/일·₩1000, US $1M/일·$1, 중앙값, fetch 0) + `indicators.median_turnover` + `daily_scan --no-liquidity` + 백테스트 옵션. **검증: US base 90d +118.6%→+6.2%, 승률 37%→45%, Sharpe 0.016→0.092(허수=잡주 확정). US 6111→3699(61%) 통과.** 기본 ON→다음 스캔부터 스냅샷 자동정제.
   - [x] **[P1] 생존편향 보정 백테스트 (KR)** — FDR로 상폐 주권 337종목(40만행) fetch(`fetch_delisted_kr.py`)+상폐인지 전향수익률(`survivorship_check.py`). **KR base: 생존자-only +4.1%→생존자+상폐 +1.6%/40%/Sharpe 0.036(상폐신호 1982건=13%, 그 90d −13.4%/승률27%).** 결론: **맨몸 게이트는 하한+보정 후 사실상 엣지 없음=동전던지기 → enrichment가 승률의 본질** 정량 재확인. US 보정은 보류(yfinance 상폐시세 미제공=무료한계). **임계 튜닝은 계속 보류**(과신 금지).
   - [x] **[P1] dart_risk_event** — DART 감사의견 비적정(accnutAdtorNmNdAdtOpinion) + 주요사항보고서 위험이벤트(부도/영업정지/회생/채권관리). FundamentalsBundle audit_qualified·risk_event(4곳 라운드트립) + fundamental 필터 **치명(단독제외)/약신호(누적) 분리**. 실 DART 검증: 금양 의견거절→audit_qualified=True→단독제외(min_violations=0에도). KR전용·fail-soft.
+  - [x] **[P1] 점수 분해 UI** — 엔진 apply_filters가 행마다 `_parts`(요소별 점수×가중치→정규화 기여) 노출 + app 메인에 "🔍 점수 분해" 섹션(종목 선택→기여 막대+표). 검증: 기여 합==점수. "왜 이 점수인지" 블랙박스 해소. (`_`접두 키는 표·CSV에서 숨김)
+  - [블록] **[P2] kr_short_and_flow** — pykrx·KRX OTP 사망(무료 공매도잔고 소스 없음), 네이버 수급만 fragile 가능 → 사용자 결정으로 보류(결정로그 2026-06-25).
   - [ ] **[P1] fundamental 치명/약신호 분리** + KR shares·4Q적자 작동 수정 / 점수분해·면책 UI / 의존성 핀 / **backtest 실데이터 confirm(캘리브레이션 선결)**.
   - [ ] **[P1] 유동성(거래대금) 하한** — base/universe is_excluded(가장 값싼 1차 컷, atr보다 먼저).
   - [ ] **[P2] kr_short_and_flow**(pykrx 공매도·수급) / 회복라벨 IC·IR 가중 재산정+백분위정규화·3축 / 후반부 루프(DECISIONS·사이징·추적리뷰).
@@ -59,6 +61,7 @@
 - [ ] 전종목 일일 스캔 런타임/비용 튜닝: 전 유형 KR+US ≈ 1만 종목 → 1.5~2.5h(첫 실행). public이라 분 무제한이나 길면 워런트/유닛 제외 또는 US 주1회 등 고려.
 
 ## 결정 로그
+- (2026-06-25) **kr_short_and_flow(P2) 보류 — 데이터 소스 사망.** 실측: pykrx 1.2.8의 get_shorting_balance_by_date·투자자수급 함수 전부 빈응답("KRX 로그인 실패", 결정로그의 그 벽). KRX data포털 OTP도 CSV 빈응답(len 0). → **공매도 잔고는 무료 소스 없음.** 외국인/기관 수급만 네이버 금융 스크래핑(`item/frgn.naver` table 3=기관·외국인 순매매량+거래량)으로 가능하나 fragile + GitHub Actions 데이터센터 IP 차단 가능성. 사용자 결정으로 보류, 점수분해 UI로 전환. (재개 조건: 유료 KRX 데이터 또는 안정 소스 확보.)
 - (2026-06-23) **최적화는 멀티에이전트 감사·리서치·검증으로 설계 후 단계 적용.** 코드 4영역 감사 + 웹 리서치(팩터투자·전문스크리너·KR데이터·폭락주특화) + 적대적 검증을 병렬로 돌려 `docs/service-design-2026-06-23.md` 수립. 채택 원칙: ①추가는 **직교성+무료데이터+실증근거** 3요건 충족만(MACD/RSI 류 중복 재추천 배제), ②삭제는 바로 안 하고 확인(opt-in+런타임정규화라 rsi/bollinger/ma 이중계상은 동시활성 시에만→백테스트 후 결정), ③신규 펀더지표는 **FundamentalsBundle 4곳 직렬화 라운드트립 무음먹통**(2026-05-24 재발 위험)을 1 PR로 원자처리, ④Altman/F-score는 적자기업 부호 가드 + 게이트는 백테스트 후. trade-off: 선(先)설계로 착수가 늦지만, 미검증 가중치·이중계상·무음먹통을 사전 차단.
 - (2026-06-23) **ATR을 첫 신규지표로 즉시 추가**(외부호출 0·직렬화위험 0·직교차원). 대안: P0 펀더지표부터 → 4곳 라운드트립+KR CFO 매핑 등 선결이 많아 한 턴에 무리. ATR은 일봉 OHLC만으로 자족적이라 '리스크/사이징' 빈 차원을 즉시 채우고 to_watchlist 손절초안으로 발굴→실행을 잇는 가장 깨끗한 착수점. 정보성(weight 0)이라 합성점수 교란 없음.
 - (2026-06-23) **drawdown 기본 −80→−50, Actions 캐시키 run_id→고정.** 전자: daily-scan 운영값(−50)과 코드 default(−80) 불일치로 스냅샷↔로컬 UI가 다른 모집단을 보던 정합성 결함 해소. 후자: run_id 키는 정확매치 영구 miss라 매 런 풀 리페치(런타임 7m↔1h11m 실측 편차) → 고정키로 churn 제거. push 시 반영.

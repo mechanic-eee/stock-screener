@@ -139,6 +139,8 @@ def apply_filters(
         }
         wsum = w(base.key)
         sscore = w(base.key) * base_out.score
+        # per-filter contribution trace for the UI's score breakdown
+        parts: list[tuple[str, float, float]] = [(base.label, base_out.score, w(base.key))]
 
         passed = True
         for key in tech_keys:
@@ -151,6 +153,7 @@ def apply_filters(
                 break
             wsum += w(key)
             sscore += w(key) * out.score
+            parts.append((flt.label, out.score, w(key)))
         if not passed:
             continue
 
@@ -169,6 +172,7 @@ def apply_filters(
                 break
             wsum += w(key)
             sscore += w(key) * out.score
+            parts.append((flt.label, out.score, w(key)))
         if not passed:
             continue
 
@@ -186,6 +190,7 @@ def apply_filters(
                 break
             wsum += w(key)
             sscore += w(key) * out.score
+            parts.append((flt.label, out.score, w(key)))
         if not passed:
             continue
 
@@ -211,12 +216,14 @@ def apply_filters(
                 break
             wsum += w(key)
             sscore += w(key) * out.score
+            parts.append((flt.label, out.score, w(key)))
         if not passed:
             continue
 
         # bonus pass: never gates, added after normalization (PRD §5.5.2 —
         # the total may exceed 100). Not part of the weighted average.
         bonus_total = 0.0
+        bonus_parts: list[tuple[str, float]] = []
         for key in bonus_keys:
             flt = get(key)
             if flt.needs_catalyst and getattr(data, "catalyst", None) is None:
@@ -224,9 +231,18 @@ def apply_filters(
             out = flt.apply(data, selected[key])
             row[flt.label] = out.detail
             bonus_total += out.score
+            bonus_parts.append((flt.label, out.score))
 
         base_score = (sscore / wsum) if wsum else 0.0
         row["점수"] = round(base_score + bonus_total, 1)
+        # score breakdown: each filter's normalized contribution (sums to the
+        # pre-bonus score), plus bonus filters added on top.
+        breakdown = [{"요소": lbl, "점수": round(sc, 1), "가중치": round(wt, 3),
+                      "기여": round((wt * sc / wsum) if wsum else 0.0, 1)}
+                     for lbl, sc, wt in parts]
+        breakdown += [{"요소": f"{lbl} (보너스)", "점수": round(sc, 1), "가중치": 0.0, "기여": round(sc, 1)}
+                      for lbl, sc in bonus_parts]
+        row["_parts"] = breakdown
         results.append(row)
 
     results.sort(key=lambda r: r.get("점수", 0), reverse=True)

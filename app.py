@@ -358,14 +358,35 @@ else:
             )
     st.subheader(f"결과: {len(rows)}종목 (점수순) · 후보 {len(shown)}/{len(cands)}")
     if rows:
+        # hide private keys (e.g. _parts, used only for the breakdown below)
+        display_rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
         front = ["ticker", "name", "market", "점수", "close", "하락률"]
-        cols = front + [c for c in rows[0].keys() if c not in front]
-        st.dataframe(rows, width="stretch", hide_index=True, column_order=cols)
+        cols = front + [c for c in display_rows[0].keys() if c not in front]
+        st.dataframe(display_rows, width="stretch", hide_index=True, column_order=cols)
         st.download_button(
             "결과 CSV 다운로드",
-            data=_to_csv(rows),
+            data=_to_csv(display_rows),
             file_name="screener_results.csv",
             mime="text/csv",
         )
+
+        # ---- Score breakdown: why did this name get this score? ----
+        st.markdown("##### 🔍 점수 분해 — 왜 이 점수인지")
+        opts = {f"{r['name']} ({r['ticker']}) · {r['점수']}점": i for i, r in enumerate(rows)}
+        pick = st.selectbox("종목 선택", list(opts.keys()), key="breakdown.pick")
+        parts = rows[opts[pick]].get("_parts") or []
+        if len(parts) <= 1:
+            st.caption("보조지표를 켜면 각 요소의 기여가 여기 분해됩니다 (지금은 기본 폭락 점수뿐).")
+        else:
+            import pandas as _pd
+
+            bdf = _pd.DataFrame(parts)
+            c1, c2 = st.columns([3, 4])
+            with c1:
+                st.dataframe(bdf, hide_index=True, width="stretch")
+            with c2:
+                st.bar_chart(bdf.set_index("요소")["기여"], horizontal=True)
+            st.caption("**기여** = 가중치 × 점수 ÷ Σ가중치 (활성 요소로 정규화). 기여 합 = 점수"
+                       "(카탈리스트 보너스는 정규화 후 가산이라 합이 100을 넘을 수 있음).")
     else:
         st.warning("조건을 만족하는 종목이 없습니다. 임계값을 완화해 보세요.")
