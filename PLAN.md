@@ -23,7 +23,8 @@
 - [x] **[지표고도화] 보조지표 4종 추가** — 상대강도(RS, 시장 대비 초과수익) · OBV 누적매집 · VCP 변동성수축(베이스) · 밸류에이션(PER/PBR/ROE/배당). 절대신호 위주였던 셋에 상대성과·매집·바닥구조·저평가 차원 보강. 총 보조지표 13종. (다음 후보: ATR 손절/사이징, ADX 추세강도, 200DMA 회복, 섹터 상대강도)
 - [ ] 감성 스코어러 모델 교체 검토 (KR-FinBERT 등)
 - **[2026-06-23 최적화 로드맵 — `docs/service-design-2026-06-23.md`]**
-  - [x] **ATR 리스크/손절 지표 추가**(indicators.atr + scoring.atr_risk_score + filters/atr_risk.py). 비어있던 리스크/사이징 차원 첫 입력. 후속: to_watchlist 손절 자동초안.
+  - [x] **ATR 리스크/손절 지표 추가**(indicators.atr + scoring.atr_risk_score + filters/atr_risk.py). 비어있던 리스크/사이징 차원 첫 입력.
+  - [x] **to_watchlist ATR 손절 자동초안** — 시드 시 손절셀을 `close−2.5×ATR`로 자동채움(`--stop-atr-mult`)+ATR% 논거 추가. 후보 prices로 계산(fetch 0), CSV소스는 TBD 폴백, 손절≤0이면 TBD. 워치리스트 TBD 방치 해소. dry-run 검증.
   - [x] **drawdown 기본 −80→−50 통일** + **Actions 캐시키 고정**(screener-db-v1) — 캐시키는 commit+push 필요.
   - [x] **[P0] kr_market_action** — KR 관리종목/투자주의환기 게이트(`data/market_actions.py`+universe). FDR ADMINISTRATIVE+KRX Dept, 일일캐시·fail-soft. **라이브 144종목 차단 검증.**
   - [x] **[P0] 펀더 묶음 1 PR (Altman Z''·Piotroski F·accruals·gross_profit·발행주식수)** — FundamentalsBundle 4곳 라운드트립(db SCHEMA+migrate / _save / _load_cached / snapshot 사이드카) 원자처리 + KR DART CFO/총자산/유동자산/이익잉여금/매출원가 매핑 추가. 부호 가드(적자기업 None 폴백), Altman 게이트 OFF(스코어러만, 백테스트 후 게이트화). **실데이터 검증: CRL/AHCO 전신호·FLG(은행) fail-soft·SQLite/사이드카 라운드트립 보존·엔진 5필터 동작.** (KR shares는 DART 재무제표 밖 → share_issuance는 현재 US만)

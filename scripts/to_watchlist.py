@@ -93,8 +93,30 @@ def _parse_weights(s: str | None) -> dict[str, float]:
 # --------------------------------------------------------------------------- #
 # Ranked rows from a source
 # --------------------------------------------------------------------------- #
+def _attach_atr(row: dict, prices, stop_mult: float) -> None:
+    """Attach ATR%-based volatility + a suggested stop (close - mult*ATR) to a row.
+
+    Uses the candidate's daily OHLC (already in the snapshot) — no extra fetch.
+    Lets the watchlist seed arrive with a real stop instead of 'TBD'."""
+    from screener import indicators
+
+    close = prices["close"].dropna()
+    if len(close) < 15:
+        return
+    high = prices["high"] if "high" in prices else None
+    low = prices["low"] if "low" in prices else None
+    atr = indicators.atr(high, low, prices["close"], window=14)
+    a = float(atr.iloc[-1])
+    last = float(close.iloc[-1])
+    if last <= 0 or a != a:  # NaN guard
+        return
+    row["atr_pct"] = a / last * 100.0
+    row["stop"] = max(0.0, last - stop_mult * a)
+
+
 def _rows_from_snapshot(source: str, min_drop: int, years: int,
-                        selected: dict | None = None, weights: dict | None = None) -> list[dict]:
+                        selected: dict | None = None, weights: dict | None = None,
+                        stop_mult: float = 2.5) -> list[dict]:
     from screener import engine, snapshot
 
     engine.ensure_filters_loaded()
@@ -107,8 +129,15 @@ def _rows_from_snapshot(source: str, min_drop: int, years: int,
         except Exception:  # noqa: BLE001
             pass
     base = {"years": years, "min_drop_pct": min_drop}
-    return engine.apply_filters(cands, base_params=base, selected=selected or {},
+    rows = engine.apply_filters(cands, base_params=base, selected=selected or {},
                                 weights=weights or None, fetch_news=False)
+    # draft an ATR-based stop per row from the candidate's price history
+    px_by_ticker = {c.ticker: c.prices for c in cands}
+    for r in rows:
+        px = px_by_ticker.get(r["ticker"])
+        if px is not None and not px.empty:
+            _attach_atr(r, px, stop_mult)
+    return rows
 
 
 def _rows_from_csv(path: str) -> list[dict]:
@@ -145,19 +174,25 @@ def _fmt_price(market: str, close: float) -> str:
     return f"${close:,.2f}"
 
 
-def _draft_row(r: dict, today: str) -> str:
+def _draft_row(r: dict, today: str, stop_mult: float = 2.5) -> str:
     name, ticker, market = r["name"], r["ticker"], r["market"]
     drop = r.get("하락률")
     score = r.get("점수")
     close = r.get("close")
+    atr_pct = r.get("atr_pct")
+    stop = r.get("stop")
     thesis_bits = []
     if drop is not None:
         thesis_bits.append(f"5년고가 대비 {drop:.0f}% 낙폭")
     if score is not None:
         thesis_bits.append(f"스크리너 {score:.0f}점")
+    if atr_pct is not None:
+        thesis_bits.append(f"ATR {atr_pct:.1f}%")
     thesis = ", ".join(thesis_bits) + " (자동초안 — 확인 필요)" if thesis_bits else "(자동초안)"
     entry = f"현재가 {_fmt_price(market, close)} 부근" if close else "TBD"
-    cells = [f"{name} ({ticker})", thesis, entry, "TBD", "TBD", "관심", today]
+    # ATR-based stop draft (close - mult*ATR); falls back to TBD without prices (CSV source)
+    stop_cell = f"{_fmt_price(market, stop)} (≈{stop_mult:g}×ATR)" if stop else "TBD"
+    cells = [f"{name} ({ticker})", thesis, entry, stop_cell, "TBD", "관심", today]
     return "| " + " | ".join(cells) + " |"
 
 
@@ -220,6 +255,8 @@ def main() -> int:
     ap.add_argument("--list-indicators", action="store_true", help="print available indicator keys and exit")
     ap.add_argument("--min-drop", type=int, default=50, help="base drawdown %% (must match the snapshot)")
     ap.add_argument("--years", type=int, default=5)
+    ap.add_argument("--stop-atr-mult", type=float, default=2.5,
+                    help="auto-draft stop = close - this*ATR (default 2.5; snapshot source only)")
     ap.add_argument("--watchlist", default=str(DEFAULT_WATCHLIST), help="WATCHLIST.md to merge into")
     ap.add_argument("--dry-run", action="store_true", help="preview rows without writing")
     args = ap.parse_args()
@@ -244,7 +281,8 @@ def main() -> int:
         rows = _rows_from_csv(args.csv)
         print(f"source: csv {args.csv} ({len(rows)} rows)", flush=True)
     else:
-        rows = _rows_from_snapshot(args.snapshot, args.min_drop, args.years, selected, weights)
+        rows = _rows_from_snapshot(args.snapshot, args.min_drop, args.years, selected, weights,
+                                   stop_mult=args.stop_atr_mult)
         ind = ("+".join(selected) if selected else "base-only")
         print(f"source: snapshot {args.snapshot} ({len(rows)} candidates) · 랭킹={ind}", flush=True)
 
@@ -281,7 +319,7 @@ def main() -> int:
         if r["ticker"] in existing:
             skipped.append(r["ticker"])
             continue
-        row_md = _draft_row(r, today)
+        row_md = _draft_row(r, today, args.stop_atr_mult)
         (kr_rows if r["market"] == "KR" else us_rows).append(row_md)
 
     print(f"\n선택 {len(selected)}종목 → 신규 KR {len(kr_rows)} · US {len(us_rows)}"
@@ -303,7 +341,7 @@ def main() -> int:
         lines = _insert_after_table(lines, US_HEADER, us_rows)
     wl_path.write_text("\n".join(lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
     print(f"\n✅ {wl_path} 에 KR {len(kr_rows)} · US {len(us_rows)}종목 추가(상태=관심). "
-          f"논거·진입구간은 자동초안이니 손절선·촉매와 함께 다듬으세요.", flush=True)
+          f"논거·진입구간·손절(≈{args.stop_atr_mult:g}×ATR)은 자동초안이니 촉매와 함께 다듬으세요.", flush=True)
     return 0
 
 
