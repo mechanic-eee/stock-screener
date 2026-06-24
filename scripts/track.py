@@ -1,0 +1,215 @@
+"""Track + review: how have the seeded / decided names actually done?
+
+Closes the loop. Parses the investing project's WATCHLIST.md (seeds, incl. the
+보류 section) and DECISIONS.md (open positions), fetches current prices, and
+reports return-since-reference, days held, and distance to stop. Writes a
+TRACKING.md snapshot next to them and prints a console table — so "did the
+screener's picks work out" becomes visible instead of forgotten.
+
+  python scripts/track.py            # console + writes stock-investing/TRACKING.md
+  python scripts/track.py --dry-run  # console only
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from datetime import date, datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+INVESTING = Path(__file__).resolve().parents[2] / "stock-investing"
+WATCHLIST = INVESTING / "WATCHLIST.md"
+DECISIONS = INVESTING / "DECISIONS.md"
+
+_TICKER = re.compile(r"\(([A-Za-z0-9.]{1,7})\)")
+_NUM = re.compile(r"-?\d[\d,]*\.?\d*")
+_DATE = re.compile(r"(20\d\d)[-.](\d\d)[-.](\d\d)")
+_SCORE = re.compile(r"스크리너\s*([\d.]+)\s*점|(\d+)\s*점")
+
+
+def _num(cell: str):
+    m = _NUM.search(cell.replace(" ", ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _parse_date(cell: str):
+    m = _DATE.search(cell)
+    if not m:
+        return None
+    try:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+
+def _is_example(cells: list[str]) -> bool:
+    joined = " ".join(cells)
+    return joined.strip().startswith("_") or "예)" in joined or "_예" in joined
+
+
+def _tables(text: str):
+    """Yield (header_cells, [data_row_cells]) for each markdown table."""
+    rows, cur = [], []
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s.startswith("|"):
+            cur.append([c.strip() for c in s.strip("|").split("|")])
+        elif cur:
+            rows.append(cur)
+            cur = []
+    if cur:
+        rows.append(cur)
+    for tbl in rows:
+        if len(tbl) < 2:
+            continue
+        header = tbl[0]
+        data = [r for r in tbl[1:] if not set("".join(r)) <= set("-: ")]  # drop the |---| separator
+        yield header, data
+
+
+def _col(header: list[str], *names: str):
+    for i, h in enumerate(header):
+        if any(n in h for n in names):
+            return i
+    return None
+
+
+def _records_from(path: Path, source: str) -> list[dict]:
+    if not path.exists():
+        return []
+    out = []
+    for header, data in _tables(path.read_text(encoding="utf-8")):
+        ci_tkr = _col(header, "티커", "종목")
+        ci_px = _col(header, "진입가", "현재가", "당시")
+        ci_stop = _col(header, "손절")
+        ci_date = _col(header, "시드", "갱신", "날짜")
+        ci_status = _col(header, "상태")
+        if ci_tkr is None or ci_px is None:
+            continue
+        for cells in data:
+            if _is_example(cells) or len(cells) <= max(ci_tkr, ci_px):
+                continue
+            mt = _TICKER.search(cells[ci_tkr]) or re.search(r"\b(\d{6})\b", cells[ci_tkr])
+            if not mt:
+                continue
+            ticker = mt.group(1)
+            ref = _num(cells[ci_px])
+            if ref is None or ref <= 0:
+                continue
+            sc = _SCORE.search(" ".join(cells))
+            out.append({
+                "ticker": ticker,
+                "market": "KR" if ticker.isdigit() and len(ticker) == 6 else "US",
+                "ref_price": ref,
+                "stop": _num(cells[ci_stop]) if ci_stop is not None and ci_stop < len(cells) else None,
+                "date": _parse_date(cells[ci_date]) if ci_date is not None and ci_date < len(cells) else None,
+                "status": cells[ci_status] if ci_status is not None and ci_status < len(cells) else "",
+                "score": float(sc.group(1) or sc.group(2)) if sc else None,
+                "source": source,
+            })
+    return out
+
+
+def _current_price(market: str, ticker: str):
+    from screener.data import prices as prices_mod
+    df = prices_mod.get_prices(market, ticker, years=1, max_age_days=1.0)
+    if df is None or df.empty:
+        return None
+    return float(df["close"].iloc[-1])
+
+
+def _fmt(market: str, v) -> str:
+    if v is None:
+        return "—"
+    return f"{v:,.0f}원" if market == "KR" else f"${v:,.2f}"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dry-run", action="store_true", help="콘솔만, TRACKING.md 안 씀")
+    args = ap.parse_args()
+
+    # DECISIONS positions take priority over watchlist seeds for the same ticker
+    recs: dict[str, dict] = {}
+    for r in _records_from(WATCHLIST, "watchlist"):
+        recs.setdefault(r["ticker"], r)
+    for r in _records_from(DECISIONS, "decision"):
+        recs[r["ticker"]] = r  # override
+    items = list(recs.values())
+    if not items:
+        print("추적할 항목이 없습니다 (WATCHLIST/DECISIONS에 티커+가격 행 필요).")
+        return 0
+
+    print(f"추적 {len(items)}종목 — 현재가 조회 중...", flush=True)
+    today = date.today()
+    rows = []
+    for it in items:
+        cur = _current_price(it["market"], it["ticker"])
+        ret = ((cur - it["ref_price"]) / it["ref_price"] * 100.0) if cur else None
+        days = (today - it["date"]).days if it["date"] else None
+        vs_stop = ((cur - it["stop"]) / cur * 100.0) if (cur and it["stop"]) else None
+        rows.append({**it, "current": cur, "ret": ret, "days": days, "vs_stop": vs_stop})
+
+    rows.sort(key=lambda r: (r["ret"] is None, -(r["ret"] or 0)))
+
+    # console
+    print(f"\n{'티커':<8}{'시장':<5}{'기준가':>12}{'현재가':>12}{'수익률':>9}{'손절여유':>9}{'보유일':>7}  소스")
+    for r in rows:
+        ret = f"{r['ret']:+.1f}%" if r["ret"] is not None else "—"
+        vs = f"{r['vs_stop']:+.1f}%" if r["vs_stop"] is not None else "—"
+        dd = f"{r['days']}d" if r["days"] is not None else "—"
+        print(f"{r['ticker']:<8}{r['market']:<5}{_fmt(r['market'], r['ref_price']):>12}"
+              f"{_fmt(r['market'], r['current']):>12}{ret:>9}{vs:>9}{dd:>7}  {r['source']}")
+
+    valid = [r for r in rows if r["ret"] is not None]
+    if valid:
+        avg = sum(r["ret"] for r in valid) / len(valid)
+        win = sum(1 for r in valid if r["ret"] > 0) / len(valid)
+        print(f"\n요약: {len(valid)}종목 평균 {avg:+.1f}%, 승률 {win:.0%}")
+        scored = [r for r in valid if r["score"] is not None]
+        uniq = {round(r["score"], 1) for r in scored}
+        if len(uniq) >= 3:
+            import statistics
+            corr_note = "점수↑일수록 수익↑ 경향 확인 가능" if scored else ""
+            hi = [r["ret"] for r in scored if r["score"] >= statistics.median(r["score"] for r in scored)]
+            lo = [r["ret"] for r in scored if r["score"] < statistics.median(r["score"] for r in scored)]
+            if hi and lo:
+                print(f"점수 실효성: 상위점수군 평균 {sum(hi)/len(hi):+.1f}% vs 하위점수군 {sum(lo)/len(lo):+.1f}%")
+        elif scored:
+            print(f"점수 실효성: 점수 분산이 작아(값 {sorted(uniq)}) 검증 보류 — "
+                  f"지표랭킹(--indicators) 시드 이후 유의미.")
+
+    if not args.dry_run:
+        out = [f"# TRACKING — 시드/포지션 사후 추적", "",
+               f"_생성: {datetime.now().isoformat(timespec='minutes')} · `scripts/track.py`_",
+               f"_{len(valid)}종목 평균 {avg:+.1f}%, 승률 {win:.0%}_" if valid else "_데이터 없음_", "",
+               "| 티커 | 시장 | 기준가 | 현재가 | 수익률 | 손절여유 | 보유일 | 점수 | 상태 | 소스 |",
+               "|---|---|---|---|---|---|---|---|---|---|"]
+        for r in rows:
+            out.append("| " + " | ".join([
+                r["ticker"], r["market"], _fmt(r["market"], r["ref_price"]),
+                _fmt(r["market"], r["current"]),
+                f"{r['ret']:+.1f}%" if r["ret"] is not None else "—",
+                f"{r['vs_stop']:+.1f}%" if r["vs_stop"] is not None else "—",
+                f"{r['days']}d" if r["days"] is not None else "—",
+                f"{r['score']:.0f}" if r["score"] is not None else "—",
+                r["status"] or "—", r["source"]]) + " |")
+        (INVESTING / "TRACKING.md").write_text("\n".join(out) + "\n", encoding="utf-8")
+        print(f"\n✅ {INVESTING / 'TRACKING.md'} 갱신.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

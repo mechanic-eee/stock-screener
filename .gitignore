@@ -18,6 +18,7 @@ data/candidates.parquet
 data/benchmarks.parquet
 data/dart_corp_map.json
 data/kr_admin_cache.json
+data/portfolio.json
 data/valuations.parquet
 data/fundamentals.parquet
 exports/

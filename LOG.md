@@ -64,3 +64,5 @@
 ## [2026-06-25] stock-screener | feat | [P1] to_watchlist ATR 손절 자동초안: 시드 시 손절셀=close−2.5×ATR 자동채움(--stop-atr-mult)+ATR% 논거. 후보 prices로 계산(fetch 0), CSV는 TBD폴백, 손절≤0이면 TBD. 워치리스트 TBD 방치 해소. dry-run 검증(깨끗한나라우 손절 9144원 등).
 ## [2026-06-25] stock-screener | feat | [P1] 점수 분해 UI: 엔진 apply_filters가 행마다 _parts(요소별 점수×가중치→정규화 기여) 노출 + app 메인 점수분해 섹션(종목선택→막대+표). 검증 기여합==점수(49.3). _접두키는 표·CSV 숨김.
 ## [2026-06-25] stock-screener | research | [P2] kr_short_and_flow 데이터소스 실측: pykrx 공매도/수급 전부 빈응답(KRX 로그인벽)·KRX OTP CSV 빈응답 → 무료 공매도 소스 없음. 네이버 frgn만 외국인/기관 수급 스크래핑 가능. 사용자 결정으로 보류.
+## [2026-06-25] stock-screener | feat | [큰건] stock-investing 후반부: DECISIONS.md(결정저널) + scripts/position_size.py(손절기반 리스크 사이징, 계좌 R%·최대비중, 검증) + scripts/track.py(시드/포지션 사후 수익률·손절근접·보유일+점수실효성→TRACKING.md). 발굴→결정→사이징→추적→리뷰 루프 완성.
+## [2026-06-25] stock-screener | research | track.py 첫 추적: 5/25 base-only 시드 10종목 31일 평균 -13.1%·승률30%(CNTX -77.8%, KR 3종 -21~30%). 점수분산0(전부100)이라 점수검증 보류. enrichment(부도/유동성/재무 필터)가 승률 본질임을 실데이터 재확인.

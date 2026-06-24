@@ -35,6 +35,7 @@
   - [x] **[P1] dart_risk_event** — DART 감사의견 비적정(accnutAdtorNmNdAdtOpinion) + 주요사항보고서 위험이벤트(부도/영업정지/회생/채권관리). FundamentalsBundle audit_qualified·risk_event(4곳 라운드트립) + fundamental 필터 **치명(단독제외)/약신호(누적) 분리**. 실 DART 검증: 금양 의견거절→audit_qualified=True→단독제외(min_violations=0에도). KR전용·fail-soft.
   - [x] **[P1] 점수 분해 UI** — 엔진 apply_filters가 행마다 `_parts`(요소별 점수×가중치→정규화 기여) 노출 + app 메인에 "🔍 점수 분해" 섹션(종목 선택→기여 막대+표). 검증: 기여 합==점수. "왜 이 점수인지" 블랙박스 해소. (`_`접두 키는 표·CSV에서 숨김)
   - [블록] **[P2] kr_short_and_flow** — pykrx·KRX OTP 사망(무료 공매도잔고 소스 없음), 네이버 수급만 fragile 가능 → 사용자 결정으로 보류(결정로그 2026-06-25).
+  - [x] **[큰건] stock-investing 후반부(결정저널·사이징·추적/리뷰)** — DECISIONS.md(결정저널) + `scripts/position_size.py`(손절기반 리스크 사이징, 계좌 R%·최대비중) + `scripts/track.py`(시드/포지션 사후 수익률·손절근접·보유일 + 점수실효성 → TRACKING.md). 발굴→결정→사이징→추적→리뷰 루프 완성. **첫 추적: 5/25 base-only 시드 10종목 31일 평균 −13.1%·승률30%**(CNTX −77.8% 등 falling knife 다수) → enrichment 필요성 실증. 계좌설정은 data/portfolio.json(gitignore).
   - [ ] **[P1] fundamental 치명/약신호 분리** + KR shares·4Q적자 작동 수정 / 점수분해·면책 UI / 의존성 핀 / **backtest 실데이터 confirm(캘리브레이션 선결)**.
   - [ ] **[P1] 유동성(거래대금) 하한** — base/universe is_excluded(가장 값싼 1차 컷, atr보다 먼저).
   - [ ] **[P2] kr_short_and_flow**(pykrx 공매도·수급) / 회복라벨 IC·IR 가중 재산정+백분위정규화·3축 / 후반부 루프(DECISIONS·사이징·추적리뷰).
