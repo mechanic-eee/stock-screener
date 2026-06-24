@@ -58,3 +58,4 @@
 ## [2026-06-23] stock-screener | fix | 기본 하락률 슬라이더가 결과 건수를 안 바꾸던 버그: apply_filters가 base drawdown을 스코어러로만 쓰고 게이트로 안 써서 임계 올려도 종목 안 빠짐 → base_out.passed False면 drop 추가. 슬라이더 스텝 5단위(min_drop), years는 1년 단위 확인. 검증: 85%→71·90%→31종목.
 ## [2026-06-23] stock-screener | work | 앱 UX: 메인에 점수 산정·보조지표 사용법 info 패널(expander) 추가 + 보조지표 사이드바 순서를 중요도순(_DISPLAY_ORDER: 펀더·부도·퀄리티→모멘텀/수급→리스크→확증) 정렬 + indicator-guide.md 최신화(신규 6지표·가중치 반영).
 ## [2026-06-23] stock-screener | handoff | 세션 정리: 하루 10커밋 push 완료, brain 인계노트 작성(handoff/2026-06-23-폭락주스크리너-최적화.md, 교훈=직렬화 라운드트립·orphan force-push 오진단·백테스트 생존편향·FDR KRX-ADMINISTRATIVE). PLAN/대시보드 최종 갱신. 다음: 유동성 하한→생존편향 보정 백테스트.
+## [2026-06-24] stock-screener | feat | [P1] 유동성/가격 하한: engine.build_candidates 시장별 floor(KR ₩5억·₩1000, US $1M·$1, median, fetch 0)+indicators.median_turnover+daily_scan --no-liquidity+백테스트 옵션. 검증: US base 90d +118.6%→+6.2%, 승률 37%→45%, Sharpe 0.016→0.092. 허수=잡주 확정. US 6111→3699(61%).

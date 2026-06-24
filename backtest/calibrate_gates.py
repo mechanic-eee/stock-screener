@@ -34,6 +34,8 @@ DEFAULT_PARAMS = {
     "macd_signal": 9,
     "volume_ma_window": 20,
     "lookback_years": 5,
+    "min_turnover": 0,   # median daily trading value floor (close*volume); 0 = off
+    "min_price": 0,      # min price at signal; 0 = off
 }
 
 OFAT_VARIATIONS = {
@@ -71,6 +73,11 @@ def find_gate_signals(group: pd.DataFrame, params: Dict) -> pd.DataFrame:
     macd, signal_line = compute_macd(close, params["macd_fast"], params["macd_slow"], params["macd_signal"])
     drawdown = compute_drawdown(close, params["lookback_years"] * 252)
     vol_ratio = compute_volume_ratio(volume, params["volume_ma_window"])
+    # liquidity floor: median daily trading value over the volume window. Drops
+    # un-tradable penny/illiquid names that otherwise dominate the tails.
+    min_turn = params.get("min_turnover", 0)
+    min_px = params.get("min_price", 0)
+    turn_med = (close * volume).rolling(params["volume_ma_window"]).median() if min_turn else None
 
     macd_zc = (macd > 0) & (macd.shift(1) <= 0)
     macd_diff = macd - signal_line
@@ -82,6 +89,12 @@ def find_gate_signals(group: pd.DataFrame, params: Dict) -> pd.DataFrame:
         d = drawdown.iloc[i]
         if pd.isna(d) or d > -params["min_drawdown_pct"]:
             continue
+        if min_px and (pd.isna(close.iloc[i]) or close.iloc[i] < min_px):
+            continue
+        if min_turn:
+            tm = turn_med.iloc[i]
+            if pd.isna(tm) or tm < min_turn:
+                continue
         lo = max(0, i - window + 1)
         hi = i + 1
         zc_in = macd_zc.iloc[lo:hi].any()
@@ -258,7 +271,13 @@ def main():
     ap.add_argument("--n-stocks", type=int, default=200)
     ap.add_argument("--n-years", type=int, default=7)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--min-turnover", type=float, default=0,
+                    help="median daily trading value floor (close*volume, e.g. 1e6 for $1M)")
+    ap.add_argument("--min-price", type=float, default=0,
+                    help="minimum price at signal (e.g. 1 for $1)")
     args = ap.parse_args()
+    DEFAULT_PARAMS["min_turnover"] = args.min_turnover
+    DEFAULT_PARAMS["min_price"] = args.min_price
 
     if args.synthetic:
         print(f"[synthetic] {args.n_stocks} stocks x {args.n_years} years (seed={args.seed})")

@@ -54,6 +54,21 @@ def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
     return signed.cumsum()
 
 
+def median_turnover(close: pd.Series, volume: pd.Series, days: int = 20) -> float:
+    """Typical daily trading value (close * volume) over the recent window.
+
+    Median, not mean, so a single spike day can't lift an otherwise illiquid name
+    over a liquidity floor. NaN when no usable days. Currency follows the price
+    (₩ for KR, $ for US).
+    """
+    c = close.tail(days)
+    v = volume.tail(days)
+    tv = (c * v).replace([float("inf"), float("-inf")], pd.NA).dropna()
+    if tv.empty:
+        return float("nan")
+    return float(tv.median())
+
+
 def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
     """Average True Range (Wilder's smoothing).
 

@@ -35,6 +35,9 @@ def main() -> int:
                     help="security types to include (default: all)")
     ap.add_argument("--min-drop", type=int, default=50)
     ap.add_argument("--years", type=int, default=5)
+    ap.add_argument("--no-liquidity", action="store_true",
+                    help="disable the per-market liquidity floor (median daily "
+                         "turnover + min price; default on, drops un-tradable names)")
     ap.add_argument("--top", type=int, default=15, help="how many to include in the Telegram alert")
     ap.add_argument("--out", default=str(snapshot.DEFAULT_PATH))
     ap.add_argument("--cooldown-days", type=int, default=cooldown.DEFAULT_BASE_DAYS,
@@ -61,8 +64,10 @@ def main() -> int:
     cands = engine.build_candidates(
         args.markets, base_params=base, years=args.years,
         include_types=args.types, progress_cb=cb,
+        apply_liquidity=not args.no_liquidity,
     )
-    print(f"base survivors: {len(cands)}", flush=True)
+    print(f"base survivors: {len(cands)} (liquidity floor "
+          f"{'off' if args.no_liquidity else 'on'})", flush=True)
 
     out_path = snapshot.export_candidates(cands, args.out)
     print(f"snapshot written: {out_path} ({len(cands)} tickers)", flush=True)

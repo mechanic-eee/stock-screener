@@ -18,6 +18,7 @@ from typing import Callable, Optional
 from . import catalysts as catalysts_mod
 from . import filters as filters_pkg
 from . import fundamentals as fundamentals_mod
+from . import indicators as indicators_mod
 from . import news as news_pkg
 from . import valuation as valuation_mod
 from .data import prices as prices_mod
@@ -26,6 +27,16 @@ from .filters.base import base_filters, get
 from .models import TickerData
 
 ProgressCb = Optional[Callable[[int, int, str], None]]
+
+# Per-market liquidity floor: (min median daily trading value, min price). A deep
+# drawdown universe is full of names too illiquid / penny-priced to actually
+# trade or size — the real-data backtest (docs/backtest-findings-2026-06-23)
+# showed the US side was noise-dominated (Sharpe ~0) precisely because of this.
+# Computed from already-fetched prices, so it adds no network cost.
+LIQUIDITY_FLOORS: dict[str, tuple[float, float]] = {
+    "KR": (500_000_000.0, 1000.0),   # ₩500M/day, ₩1,000
+    "US": (1_000_000.0, 1.0),        # $1M/day, $1
+}
 
 
 def build_candidates(
@@ -36,11 +47,15 @@ def build_candidates(
     limit: Optional[int] = None,
     progress_cb: ProgressCb = None,
     include_types: list[str] | tuple[str, ...] = ("common",),
+    apply_liquidity: bool = True,
+    liq_days: int = 20,
+    liquidity_floors: dict[str, tuple[float, float]] | None = None,
 ) -> list[TickerData]:
     rows = universe_mod.build_universe(markets, include_types=include_types)
     if limit:
         rows = rows[:limit]
     base = base_filters()[0]  # the drawdown screen
+    floors = liquidity_floors if liquidity_floors is not None else LIQUIDITY_FLOORS
     total = len(rows)
     candidates: list[TickerData] = []
     for i, row in enumerate(rows):
@@ -49,6 +64,14 @@ def build_candidates(
         df = prices_mod.get_prices(row["market"], row["ticker"], years=years, max_age_days=max_age_days)
         if df is None or df.empty:
             continue
+        # liquidity floor (uses already-fetched prices, no extra fetch): drop names
+        # too thin/penny to trade before the drawdown screen even looks at them.
+        if apply_liquidity:
+            floor_turn, floor_price = floors.get(row["market"], (0.0, 0.0))
+            last_close = float(df["close"].iloc[-1])
+            turn = indicators_mod.median_turnover(df["close"], df["volume"], days=liq_days)
+            if last_close < floor_price or not (turn >= floor_turn):
+                continue
         data = TickerData(ticker=row["ticker"], market=row["market"], name=row["name"],
                           prices=df, security_type=row.get("security_type", "common"))
         if base.apply(data, base_params).passed:

@@ -176,3 +176,6 @@
 ### 4차 적용 (헬스 + 백테스트 실데이터)
 9. **[추가/P0] 헬스 dead-man-switch** — `snapshot.export_health`→`data/health.json`(마지막 스캔·시세일·후보수·enrich available비율), daily_scan 발행 + daily-scan.yml data브랜치 publish·**Actions 실패 텔레그램 핑** + app 신선도 배너(시세 5일↑ 경고 + `gh run list`/`git fetch` 진단). '성공'과 '정상'을 분리.
 10. **[검증/P1] backtest 실데이터 실행** — 로컬 5년치(US 6111·KR 1635) OFAT. 상세 `docs/backtest-findings-2026-06-23.md`. **절대수치 신뢰불가**(US 90d +118%=생존편향+유동성하한 부재로 잡주 아티팩트, Sharpe 0.02). **방향성 결론:** ①맨몸 게이트 승률<50%(US 33~40·KR 43~47) → enrichment 필터가 승률의 본령(이번 추가 정당화) ②US 유동성하한 시급(Sharpe~0=노이즈) ③낙폭 −50 방어가능 ④거래량배수 올리면 악화. **임계·가중치 튜닝은 보류**(노이즈·편향 데이터에 과최적화 회피) → 선결: 유동성하한 + 생존편향 보정 백테스트.
+
+### 5차 적용 (유동성 하한 — 데이터근거 P1)
+11. **[추가/P1] 유동성/가격 하한** — `engine.build_candidates`에 시장별 floor(KR ₩5억/일·₩1,000, US $1M/일·$1; `indicators.median_turnover` 중앙값으로 스파이크 방지; 이미 받은 가격으로 계산 fetch 0). `daily_scan --no-liquidity`로 토글, 백테스트에도 `--min-turnover/--min-price` 추가. **검증(US base):** 90d +118.6%→**+6.2%**, 승률 37%→**45%**, Sharpe 0.016→**0.092**(≈6배) — +118% 허수가 페니·잡주였음 확정, KR(0.16)에 근접. US 6,111→**3,699(61%)** 통과. 기본 ON → 다음 daily-scan부터 스냅샷 자동 정제. **다음:** 생존편향 보정(상폐종목 포함) 백테스트 → 그 후 임계·가중치 데이터튜닝.
