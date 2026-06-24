@@ -59,3 +59,4 @@
 ## [2026-06-23] stock-screener | work | 앱 UX: 메인에 점수 산정·보조지표 사용법 info 패널(expander) 추가 + 보조지표 사이드바 순서를 중요도순(_DISPLAY_ORDER: 펀더·부도·퀄리티→모멘텀/수급→리스크→확증) 정렬 + indicator-guide.md 최신화(신규 6지표·가중치 반영).
 ## [2026-06-23] stock-screener | handoff | 세션 정리: 하루 10커밋 push 완료, brain 인계노트 작성(handoff/2026-06-23-폭락주스크리너-최적화.md, 교훈=직렬화 라운드트립·orphan force-push 오진단·백테스트 생존편향·FDR KRX-ADMINISTRATIVE). PLAN/대시보드 최종 갱신. 다음: 유동성 하한→생존편향 보정 백테스트.
 ## [2026-06-24] stock-screener | feat | [P1] 유동성/가격 하한: engine.build_candidates 시장별 floor(KR ₩5억·₩1000, US $1M·$1, median, fetch 0)+indicators.median_turnover+daily_scan --no-liquidity+백테스트 옵션. 검증: US base 90d +118.6%→+6.2%, 승률 37%→45%, Sharpe 0.016→0.092. 허수=잡주 확정. US 6111→3699(61%).
+## [2026-06-24] stock-screener | feat | [P1] 생존편향 보정 백테스트(KR): FDR로 상폐 주권 337종목(40만행) fetch + 상폐인지 전향수익률. KR base 생존자-only +4.1%→생존자+상폐 +1.6%/40%/Sharpe0.036(상폐신호 13%, 90d −13.4%). 결론: 맨몸게이트 하한+보정 후 엣지 거의 없음=enrichment가 승률 본질 재확인. US보정 보류(yfinance 상폐시세 미제공).
