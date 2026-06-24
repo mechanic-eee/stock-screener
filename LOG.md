@@ -66,3 +66,5 @@
 ## [2026-06-25] stock-screener | research | [P2] kr_short_and_flow 데이터소스 실측: pykrx 공매도/수급 전부 빈응답(KRX 로그인벽)·KRX OTP CSV 빈응답 → 무료 공매도 소스 없음. 네이버 frgn만 외국인/기관 수급 스크래핑 가능. 사용자 결정으로 보류.
 ## [2026-06-25] stock-screener | feat | [큰건] stock-investing 후반부: DECISIONS.md(결정저널) + scripts/position_size.py(손절기반 리스크 사이징, 계좌 R%·최대비중, 검증) + scripts/track.py(시드/포지션 사후 수익률·손절근접·보유일+점수실효성→TRACKING.md). 발굴→결정→사이징→추적→리뷰 루프 완성.
 ## [2026-06-25] stock-screener | research | track.py 첫 추적: 5/25 base-only 시드 10종목 31일 평균 -13.1%·승률30%(CNTX -77.8%, KR 3종 -21~30%). 점수분산0(전부100)이라 점수검증 보류. enrichment(부도/유동성/재무 필터)가 승률 본질임을 실데이터 재확인.
+## [2026-06-25] stock-screener | feat | 루프 1회전: enrichment 랭킹(fundamental+RS+밸류+VCP) 시드 10종(NVO93·PGNY90·RELY89 등 점수분산 80~93, ATR손절) → 워치리스트 active. base-only(5/25 보류) vs enrichment(6/25 active) 코호트 비교 시작.
+## [2026-06-25] stock-screener | fix | track.py: 가격컬럼이 '진입 관심구간' 못잡던 것 + 날짜컬럼이 '촉매/이벤트(날짜)'에 가로채이던 버그 수정 + 풀링 요약을 코호트별(시드일)로 교체(보유기간·점수체계 혼재 오도 방지). 결과: 5/25(31d,100점)-13.1%/30% vs 6/25(0d,80~93)+0.5%/60%.
