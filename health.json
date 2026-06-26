@@ -1,0 +1,12 @@
+{
+  "last_run_utc": "2026-06-26T23:55:44+00:00",
+  "markets": [
+    "KR",
+    "US"
+  ],
+  "base_survivors": 1808,
+  "snapshot_tickers": 1808,
+  "last_price_date": "2026-06-26",
+  "fundamentals_available": 0.975,
+  "valuations_available": 0.992
+}
