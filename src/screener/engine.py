@@ -151,9 +151,10 @@ def apply_filters(
             if not out.passed:
                 passed = False
                 break
-            wsum += w(key)
-            sscore += w(key) * out.score
-            parts.append((flt.label, out.score, w(key)))
+            if out.available:  # fail-soft: a no-data filter stays neutral, never a 50-penalty
+                wsum += w(key)
+                sscore += w(key) * out.score
+                parts.append((flt.label, out.score, w(key)))
         if not passed:
             continue
 
@@ -170,9 +171,10 @@ def apply_filters(
             if not out.passed:
                 passed = False
                 break
-            wsum += w(key)
-            sscore += w(key) * out.score
-            parts.append((flt.label, out.score, w(key)))
+            if out.available:  # fail-soft: a no-data filter stays neutral, never a 50-penalty
+                wsum += w(key)
+                sscore += w(key) * out.score
+                parts.append((flt.label, out.score, w(key)))
         if not passed:
             continue
 
@@ -188,9 +190,10 @@ def apply_filters(
             if not out.passed:
                 passed = False
                 break
-            wsum += w(key)
-            sscore += w(key) * out.score
-            parts.append((flt.label, out.score, w(key)))
+            if out.available:  # fail-soft: a no-data filter stays neutral, never a 50-penalty
+                wsum += w(key)
+                sscore += w(key) * out.score
+                parts.append((flt.label, out.score, w(key)))
         if not passed:
             continue
 
@@ -214,9 +217,10 @@ def apply_filters(
             if not out.passed:
                 passed = False
                 break
-            wsum += w(key)
-            sscore += w(key) * out.score
-            parts.append((flt.label, out.score, w(key)))
+            if out.available:  # fail-soft: a no-data filter stays neutral, never a 50-penalty
+                wsum += w(key)
+                sscore += w(key) * out.score
+                parts.append((flt.label, out.score, w(key)))
         if not passed:
             continue
 

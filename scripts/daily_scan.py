@@ -39,6 +39,11 @@ def main() -> int:
                     help="disable the per-market liquidity floor (median daily "
                          "turnover + min price; default on, drops un-tradable names)")
     ap.add_argument("--top", type=int, default=15, help="how many to include in the Telegram alert")
+    ap.add_argument("--alert-indicators", nargs="*",
+                    default=["fundamental", "relative_strength", "valuation", "altman_z", "piotroski"],
+                    help="rank the alert by base + these enrichment signals (sidecars are warm from "
+                         "this run, so no extra fetch). Empty list = base-only (legacy). Default is the "
+                         "value-trap/distress/quality set — base alone is the falling-knife tie.")
     ap.add_argument("--out", default=str(snapshot.DEFAULT_PATH))
     ap.add_argument("--cooldown-days", type=int, default=cooldown.DEFAULT_BASE_DAYS,
                     help="suppress re-alerts within this many calendar days (PRD §5.6)")
@@ -98,8 +103,14 @@ def main() -> int:
     health_path = snapshot.export_health(cands, args.markets)
     print(f"health written: {health_path}", flush=True)
 
-    # rank by base score for the alert
-    rows = engine.apply_filters(cands, base_params=base, selected={})
+    # Rank the alert by the enrichment composite, not base-only — base alone ties
+    # most names at 100 (the falling-knife population the backtest + cohort
+    # tracking proved has no edge). The sidecars/SQLite cache are warm from the
+    # export step above, so this adds no fetches; no-data signals stay neutral.
+    alert_selected = {k: {} for k in (args.alert_indicators or [])}
+    rows = engine.apply_filters(cands, base_params=base, selected=alert_selected)
+    if alert_selected:
+        print(f"alert ranking: base + {'+'.join(args.alert_indicators)} ({len(rows)} after gates)", flush=True)
 
     # cooldown: drop tickers alerted recently unless their score jumped (PRD §5.6)
     suppressed = []
@@ -118,7 +129,22 @@ def main() -> int:
     header = f"\U0001F4C9 폭락주 스캔 ({'+'.join(args.markets)}, -{args.min_drop}%) — 후보 {len(rows)}종목"
     if suppressed:
         header += f" (쿨다운 {len(suppressed)} 제외)"
-    lines = [header, "상위 (점수순):"]
+    # health line: a 'succeeded-but-degraded' run (e.g. new signals 7% filled) is
+    # a green Actions run, so surface freshness + fill% in the push itself.
+    health = snapshot.load_health(None)
+    lines = [header]
+    if health:
+        sf = health.get("signal_fill") or {}
+        fa = health.get("fundamentals_available")
+        fill = min(sf.values()) if sf else None
+        warn = "⚠️ " if ((fa is not None and fa < 0.8) or (fill is not None and fill < 0.5)) else ""
+        hp = [f"시세 {health.get('last_price_date', '?')}"]
+        if fa is not None:
+            hp.append(f"펀더 {fa:.0%}")
+        if fill is not None:
+            hp.append(f"신규신호 {fill:.0%}")
+        lines.append(f"{warn}건강: " + " · ".join(hp))
+    lines.append("상위 (점수순):")
     for i, r in enumerate(top, 1):
         lines.append(f"{i}. [{r['market']}] {r['name']} ({r['ticker']}) "
                      f"{r['점수']}점 / {r['하락률']:.0f}% / {r['close']:,}")

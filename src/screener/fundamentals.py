@@ -81,7 +81,25 @@ def _yoy_row(rows: list[dict], cur_d: Optional[date]) -> Optional[dict]:
     return best if best_gap <= _YOY_TOLERANCE_DAYS else None
 
 
-def _signals_from_rows(rows: list[dict]) -> FundamentalsBundle:
+def _annualized_flow(rows: list[dict], cur: dict, field: str, market: str) -> Optional[float]:
+    """Annualize a flow line so GP/assets and accruals/assets match their annual
+    thresholds (Novy-Marx / Sloan). US rows are single quarters -> trailing-12-month
+    sum; KR DART rows are YTD-cumulative -> scaled to a full year by months covered.
+    """
+    if market == "KR":
+        v = cur.get(field)
+        if v is None:
+            return None
+        d = _to_date(cur.get("period"))
+        months = d.month if d else 12  # YTD cumulative: 03-31->3mo, 06-30->6, 09-30->9, 12-31->12
+        return v * 12.0 / months if months else None
+    vals = [r.get(field) for r in rows[:4] if r.get(field) is not None]  # US: TTM
+    if not vals:
+        return None
+    return sum(vals) * (4.0 / len(vals)) if len(vals) < 4 else sum(vals)
+
+
+def _signals_from_rows(rows: list[dict], market: str = "US") -> FundamentalsBundle:
     """Compute the PRD §5.4.3 signals from normalized period rows."""
     rows = [r for r in rows if r.get("period")]
     if not rows:
@@ -129,8 +147,13 @@ def _signals_from_rows(rows: list[dict]) -> FundamentalsBundle:
     shares = cur.get("shares")
     prev = _yoy_row(rows, cur_d)
 
-    accrual_ratio = ((ni - cfo) / ta) if (ni is not None and cfo is not None and ta and ta > 0) else None
-    gross_profitability = (gp / ta) if (gp is not None and ta and ta > 0) else None
+    # GP/assets and accruals/assets use ANNUAL thresholds, so annualize the flow
+    # numerators (quarterly US / YTD KR) before dividing by point-in-time assets.
+    ni_ann = _annualized_flow(rows, cur, "net_income", market)
+    cfo_ann = _annualized_flow(rows, cur, "op_cash_flow", market)
+    gp_ann = _annualized_flow(rows, cur, "gross_profit", market)
+    accrual_ratio = ((ni_ann - cfo_ann) / ta) if (ni_ann is not None and cfo_ann is not None and ta and ta > 0) else None
+    gross_profitability = (gp_ann / ta) if (gp_ann is not None and ta and ta > 0) else None
 
     # Altman Z'' (emerging-market / non-manufacturing). Total liabilities is
     # derived (assets - equity) since `total_debt` is interest-bearing only.
@@ -521,8 +544,17 @@ def _dart_risk_events(key: str, corp: str) -> Optional[str]:
             d = r.json()
         except Exception:  # noqa: BLE001
             continue
-        if d.get("status") == "000" and d.get("list"):
-            return label
+        if d.get("status") != "000" or not d.get("list"):
+            continue
+        if ep == "bsnSp":
+            # 영업정지(bsnSp)는 전사 부도가 아니라 부분/행정 사업라인 정지도 포함한다.
+            # 영향 매출비중(sl_vs)이 높을 때만 치명으로 본다(예: 호텔신라 10.9% 제외,
+            # 대우건설 72.8% 유지).
+            ratios = [_parse_won(it.get("sl_vs")) for it in d["list"]]
+            ratios = [v for v in ratios if v is not None]
+            if not ratios or max(ratios) < 50.0:
+                continue  # partial line suspension -> not a lethal exclusion
+        return label
     return None
 
 
@@ -640,7 +672,7 @@ def get_fundamentals(market: str, ticker: str, use_cache: bool = True,
         if use_cache:
             cached = _load_cached(conn, ticker)
             if cached is not None:
-                return _signals_from_rows(cached)
+                return _signals_from_rows(cached, market)
 
         rows: list[dict] = []
         for attempt in range(max_retries):
@@ -658,6 +690,6 @@ def get_fundamentals(market: str, ticker: str, use_cache: bool = True,
             _save(conn, ticker, rows)
         except Exception as e:  # noqa: BLE001
             log.warning("fundamentals cache save failed %s/%s: %s", market, ticker, e)
-        return _signals_from_rows(rows)
+        return _signals_from_rows(rows, market)
     finally:
         conn.close()

@@ -383,6 +383,25 @@ def _avail_ratio(path: Path) -> Optional[float]:
         return None
 
 
+def _fill_ratios(path: Path, cols: list[str]) -> dict:
+    """Per-column non-null fill rate — so a signal column that is *present but
+    93% empty* (the silent-degradation incident) is visible, unlike the
+    bundle-presence 'available' ratio which masked it."""
+    out: dict[str, float] = {}
+    try:
+        if not Path(path).exists():
+            return out
+        df = pd.read_parquet(path)
+        if df.empty:
+            return out
+        for c in cols:
+            if c in df.columns:
+                out[c] = round(float(df[c].notna().mean()), 3)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def export_health(candidates: list[TickerData], markets: list[str],
                   path: str | Path = HEALTH_PATH) -> Path:
     """Write a small health.json next to the snapshot.
@@ -409,6 +428,10 @@ def export_health(candidates: list[TickerData], markets: list[str],
         "last_price_date": last_price,
         "fundamentals_available": _avail_ratio(FUND_PATH),
         "valuations_available": _avail_ratio(VAL_PATH),
+        # per-signal fill rate: catches a 'present but mostly empty' column that
+        # 'available' (bundle presence) hides — the silent-degradation guard.
+        "signal_fill": _fill_ratios(FUND_PATH, ["f_score", "altman_z", "accrual_ratio",
+                                                "gross_profitability"]),
     }
     import json
     path = Path(path)
