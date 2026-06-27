@@ -32,6 +32,11 @@ log = logging.getLogger(__name__)
 
 REFRESH_DAYS = 80          # financials change at most quarterly
 _YOY_TOLERANCE_DAYS = 60   # how far from "exactly 1 year ago" a YoY match may be
+# Rows cached before this date predate the extended-fundamentals columns
+# (op_cash_flow / total_assets / Altman / Piotroski inputs / audit signals), so
+# their derived signals come back empty. Treat them as stale and refetch once,
+# so the new filters actually populate instead of waiting out the 80-day cache.
+_SCHEMA_CUTOFF = "2026-06-23"
 
 # Per-process cache of precomputed derived bundles, keyed by ticker. The hosted
 # app has neither a DART key nor the SQLite cache (screener.db isn't published),
@@ -569,6 +574,8 @@ def _load_cached(conn, ticker: str) -> Optional[list[dict]]:
     ).fetchone()
     if not row or not row[0]:
         return None
+    if row[0] < _SCHEMA_CUTOFF:
+        return None  # pre-extended-schema row -> refetch once to populate new columns
     fetched = _to_date(row[0])
     if fetched and (date.today() - fetched).days > REFRESH_DAYS:
         return None  # stale
