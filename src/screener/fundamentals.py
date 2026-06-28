@@ -132,7 +132,16 @@ def _signals_from_rows(rows: list[dict], market: str = "US") -> FundamentalsBund
             prev_rev = best["revenue"]
             revenue_yoy = (revenue - prev_rev) / abs(prev_rev)
 
-    # 4 consecutive quarters of losses (needs >=4 quarterly net-income points)
+    # 4 consecutive quarters of losses — US-only by design. US (yfinance) gives
+    # discrete quarterly rows so this fires; KR (DART) rows are cumulative/annual,
+    # so it stays inert for KR ON PURPOSE. Rationale (score-validation-2026-06-27):
+    # KR distress is already covered by *solvency* signals that ARE validated/
+    # factual — altman_z (bankruptcy distance, per-date IC t5.1), capital_impairment
+    # (equity<=0), and DART audit_qualified / risk_event. Adding KR 4-quarter fetch
+    # would cost ~8 extra DART calls/name + a serialization round-trip for a LETHAL
+    # gate built on mere *unprofitability* — which over-excludes the very recovery
+    # candidates this screen targets (a fallen name with loss quarters that is
+    # solvent and turning around). So it is intentionally not implemented for KR.
     ni_hist = [r.get("net_income") for r in rows[:4] if r.get("net_income") is not None]
     four_q_all_loss = len(ni_hist) >= 4 and all(x < 0 for x in ni_hist)
 
