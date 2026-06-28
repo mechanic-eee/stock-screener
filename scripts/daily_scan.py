@@ -161,9 +161,11 @@ def main() -> int:
             lines.append("시장: " + " · ".join(reg))
     except Exception:  # noqa: BLE001 — regime line is a bonus, never break the alert
         pass
-    lines.append("상위 (점수순):")
+    n_new = sum(1 for r in top if r.get("_cooldown") == "신규")
+    lines.append(f"상위 (점수순){f' · 🆕 신규 {n_new}' if n_new else ''}:")
     for i, r in enumerate(top, 1):
-        lines.append(f"{i}. [{r['market']}] {r['name']} ({r['ticker']}) "
+        new = " 🆕" if r.get("_cooldown") == "신규" else ""  # 처음 알림되는 종목(쿨다운 이력 없음)
+        lines.append(f"{i}. [{r['market']}] {r['name']} ({r['ticker']}){new} "
                      f"{r['점수']}점 / {r['하락률']:.0f}% / {r['close']:,}")
     msg = "\n".join(lines)
     print(msg, flush=True)
