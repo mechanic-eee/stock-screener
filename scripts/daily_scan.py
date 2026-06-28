@@ -145,6 +145,22 @@ def main() -> int:
         if fill is not None:
             hp.append(f"신규신호 {fill:.0%}")
         lines.append(f"{warn}건강: " + " · ".join(hp))
+    # market-regime line: deep-drawdown picks crash together in a market downtrend
+    # and recover in an uptrend (regime-analysis.md — KR 250d -2.8% above the 200DMA
+    # vs -16.6% below). Surface whether now is a deploy-friendly window. Fail-soft:
+    # if the benchmark isn't available (host fetch blocked), just omit the line.
+    try:
+        from screener import benchmark as _bench
+        reg = []
+        for mk in args.markets:
+            s = _bench.get_benchmark(mk)
+            if s is not None and len(s) >= 200:
+                above = float(s.iloc[-1]) >= float(s.tail(200).mean())
+                reg.append(f"{mk} {'200일선↑(배치양호)' if above else '200일선↓(주의)'}")
+        if reg:
+            lines.append("시장: " + " · ".join(reg))
+    except Exception:  # noqa: BLE001 — regime line is a bonus, never break the alert
+        pass
     lines.append("상위 (점수순):")
     for i, r in enumerate(top, 1):
         lines.append(f"{i}. [{r['market']}] {r['name']} ({r['ticker']}) "
