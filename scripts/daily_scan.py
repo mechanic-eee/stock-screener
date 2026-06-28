@@ -40,7 +40,8 @@ def main() -> int:
                          "turnover + min price; default on, drops un-tradable names)")
     ap.add_argument("--top", type=int, default=15, help="how many to include in the Telegram alert")
     ap.add_argument("--alert-indicators", nargs="*",
-                    default=["fundamental", "relative_strength", "valuation", "altman_z", "piotroski"],
+                    default=["fundamental", "valuation", "altman_z", "piotroski",
+                             "relative_strength", "atr_risk"],
                     help="rank the alert by base + these enrichment signals (sidecars are warm from "
                          "this run, so no extra fetch). Empty list = base-only (legacy). Default is the "
                          "value-trap/distress/quality set — base alone is the falling-knife tie.")

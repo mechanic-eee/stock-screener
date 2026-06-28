@@ -35,9 +35,12 @@ register(
         key="accruals",
         label="이익의 질(발생액)",
         description="(순이익−영업현금흐름)/총자산. 낮을수록(현금기반) 고점수 — 흑자전환이 진짜 현금인지 "
-        "회계 발생액 착시인지 가린다(가짜 턴어라운드 회피). 기본 점수만.",
+        "회계 발생액 착시인지 가린다. ★폭락주 유니버스에선 역설적: 점수 검증(score-validation-2026-06-27)서 "
+        "KR per-date IC −0.085(t−3.5)·US 무력 — NI≪CFO('깨끗')가 손상·감액 기업 신호(distress 혼입). "
+        "게이트로는 유효하나 합성 점수엔 불참(weight 0).",
         needs_fundamentals=True,
-        weight=0.10,
+        weight=0.0,  # consistently negative/inert IC on the drawdown universe (KR t−3.5,
+        # US ~0; score-validation-2026-06-27) — distress confound. Out of composite.
         params=[
             Param("min_score", "통과 최소 점수", "float", default=0.0, min=0.0, max=100.0, step=5.0),
         ],

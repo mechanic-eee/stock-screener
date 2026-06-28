@@ -31,7 +31,8 @@ register(
         key="rsi",
         label="RSI 임계",
         description="RSI가 지정 임계값 이하(과매도) 또는 이상인 종목. 과매도일수록 고점수.",
-        weight=0.10,
+        weight=0.05,  # market-dependent (negative US short-horizon, positive KR);
+        # halved (score-validation-2026-06-27).
         params=[
             Param("period", "기간", "int", default=14, min=2, max=50, step=1),
             Param("threshold", "임계값", "int", default=35, min=5, max=95, step=1),

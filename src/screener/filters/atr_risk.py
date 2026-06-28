@@ -51,8 +51,10 @@ register(
         label="ATR 리스크/손절",
         description="일봉 ATR(평균진폭)을 가격 대비 %로 측정해 변동성·권장손절폭(mult×ATR)을 메타데이터로 노출. "
         "폭락주는 ATR이 비정상적으로 커 동일비중 매수 시 리스크가 폭증 — 발굴→사이징을 잇는 차원. "
-        "기본은 정보성(가중 0, 제외 안 함). 가중을 올리면 '차분한 종목 선호' 스코어러로 동작.",
-        weight=0.0,
+        "'차분한(저ATR) 종목 선호' 스코어러: 백테스트에서 두 시장·전 지평 최강 예측 신호(score-validation-2026-06-27).",
+        weight=0.20,  # strongest validated price signal: cross-sectional IC t≈3~5.5
+        # in BOTH markets, all horizons (score-validation-2026-06-27). Was 0
+        # (informational); turning it on lifts US IC ~2x and un-inverts KR.
         params=[
             Param("window", "ATR 기간", "int", default=14, min=5, max=60, step=1),
             Param("stop_mult", "손절 배수(×ATR)", "float", default=2.5, min=1.0, max=5.0, step=0.5,

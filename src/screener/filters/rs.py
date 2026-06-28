@@ -54,7 +54,8 @@ register(
         description="최근 N거래일 종목 수익률 − 시장지수 수익률(US=S&P500, KR=KOSPI). "
         "시장보다 덜 빠지거나 먼저 돌면 고점수. 모든 다른 신호가 절대값인데 이건 상대 성과. "
         "벤치마크 없으면 중립 50. 기본은 점수만, '통과 최소 점수'를 올리면 게이트.",
-        weight=0.15,
+        weight=0.05,  # carried the top weight but IC≈0 in both markets
+        # (score-validation-2026-06-27); cut 0.15→0.05.
         params=[
             Param("window", "비교 거래일", "int", default=63, min=10, max=252, step=1,
                   help="상대 수익률을 측정할 최근 거래일 수(63≈3개월)."),

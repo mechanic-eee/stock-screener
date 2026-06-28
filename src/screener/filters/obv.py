@@ -44,7 +44,8 @@ register(
         description="최근 N일 OBV(거래량 방향성 누적) 변화를 거래량 대비 비율로 점수화. "
         "양수=매집(상승일 거래량 우세), 음수=분산. 거래량 스파이크와 달리 '지속 매집'을 봄. "
         "기본은 점수만 기여, '통과 최소 점수'를 올리면 게이트.",
-        weight=0.10,
+        weight=0.0,  # anti-predictive: negative IC in both markets (KR t−2.3~−3.0,
+        # score-validation-2026-06-27) — out of the composite (still a usable gate).
         params=[
             Param("window", "관찰 거래일", "int", default=30, min=5, max=120, step=5,
                   help="OBV 변화를 측정할 최근 거래일 수."),

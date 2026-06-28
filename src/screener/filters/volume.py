@@ -34,7 +34,8 @@ register(
         key="volume_surge",
         label="거래량 급증",
         description="최근 단기 평균 거래량이 장기 평균 대비 배수 이상으로 늘어난 종목. 3~5x에서 최고점수, 10x↑는 이상치 플래그.",
-        weight=0.10,
+        weight=0.0,  # weak-negative IC in both markets (a surge on a fallen name reads
+        # as capitulation; score-validation-2026-06-27) — out of the composite.
         params=[
             Param("short_window", "단기 평균(일)", "int", default=5, min=2, max=30, step=1),
             Param("long_window", "장기 평균(일)", "int", default=60, min=20, max=250, step=5),

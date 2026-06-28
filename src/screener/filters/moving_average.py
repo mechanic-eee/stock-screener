@@ -36,7 +36,7 @@ register(
         key="moving_average",
         label="이동평균선",
         description="종가가 N일 이동평균선을 상향 돌파했거나 그 위에 있는 종목.",
-        weight=0.10,
+        weight=0.05,  # weak IC that fades past 60d; halved (score-validation-2026-06-27).
         params=[
             Param("window", "이동평균 기간(일)", "int", default=20, min=5, max=200, step=1),
             Param(

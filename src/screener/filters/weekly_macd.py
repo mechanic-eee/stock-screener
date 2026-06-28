@@ -84,7 +84,8 @@ register(
         label="주봉 MACD",
         description="일봉을 주봉으로 리샘플해 상위 시간프레임 MACD 상태를 점수화(PRD §5.4.4). "
         "기본은 점수만 기여(제외 안 함), '통과 최소 점수'를 올리면 게이트로 동작.",
-        weight=0.15,
+        weight=0.05,  # IC≈0 in both markets despite carrying a top weight
+        # (score-validation-2026-06-27); cut 0.15→0.05.
         params=[
             Param("fast", "Fast EMA", "int", default=12, min=2, max=50, step=1),
             Param("slow", "Slow EMA", "int", default=26, min=5, max=100, step=1),

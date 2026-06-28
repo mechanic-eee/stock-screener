@@ -30,7 +30,8 @@ register(
         key="bollinger",
         label="볼린저밴드 위치",
         description="%B(밴드 내 위치)로 하단 부근(반등 후보) 또는 상단 부근 종목을 거른다.",
-        weight=0.10,
+        weight=0.05,  # market-dependent IC (mean-reversion works in KR, not US short);
+        # halved (score-validation-2026-06-27).
         params=[
             Param("window", "기간(일)", "int", default=20, min=5, max=100, step=1),
             Param("num_std", "표준편차 배수", "float", default=2.0, min=1.0, max=4.0, step=0.1),
