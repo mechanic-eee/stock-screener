@@ -624,6 +624,12 @@ else:
                 m4.metric("ATR 손절 초안", "—",
                           help="ATR 리스크/손절 지표를 켜면 손절 초안가가 계산됩니다")
 
+            try:
+                _dark = st.context.theme.type == "dark"
+            except Exception:  # noqa: BLE001
+                _dark = True
+            txt_color = "#d1d5db" if _dark else "#374151"
+
             if len(parts) <= 1:
                 st.info("보조지표를 켜면 요소별 기여가 여기 분해됩니다 — 지금은 기본 폭락 점수뿐이에요. "
                         "사이드바 🟢 핵심 그룹부터 켜보세요.")
@@ -638,11 +644,6 @@ else:
 
                 tier_domain = ["핵심", "보강", "확증", "제외", "기본(낙폭)", "보너스"]
                 tier_range = ["#10b981", "#3b82f6", "#f59e0b", "#9ca3af", "#94a3b8", "#a855f7"]
-                try:
-                    _dark = st.context.theme.type == "dark"
-                except Exception:  # noqa: BLE001
-                    _dark = True
-                txt_color = "#d1d5db" if _dark else "#374151"
 
                 c1, c2 = st.columns([5, 6])
                 with c1:
@@ -687,5 +688,45 @@ else:
                                + " — 종목 간 분해 요소가 다르면 이 때문입니다.")
                 st.caption("**기여** = 가중치 × 점수 ÷ Σ가중치 (활성 요소로 정규화) · 기여 합 = 점수 "
                            "(카탈리스트 보너스는 정규화 후 가산이라 100을 넘을 수 있음)")
+
+            # ---- 📈 가격 맥락: 캐시된 시계열로 낙폭·손절 초안을 그림으로 ----
+            _cand = next((c for c in shown if c.ticker == r["ticker"]), None)
+            _px = getattr(_cand, "prices", None) if _cand is not None else None
+            if _px is not None and not _px.empty and "close" in _px:
+                with st.expander(f"📈 가격 차트 — {r['ticker']} (스냅샷 시세, 고점·손절 초안 표시)",
+                                 expanded=False):
+                    import altair as alt
+
+                    pdf = _px.reset_index()
+                    date_col = pdf.columns[0]
+                    pdf = pdf.rename(columns={date_col: "date"})[["date", "close"]].dropna()
+                    pdf["date"] = pd.to_datetime(pdf["date"])
+                    peak = float(pdf["close"].max())
+                    rules = [{"y": peak, "lbl": f"최고가 {_fmt_price(r['market'], peak)}",
+                              "color": "#9ca3af"}]
+                    _atr2 = (r.get("_values") or {}).get("atr_risk")
+                    if _atr2 is not None and "atr_risk" in selected:
+                        _m2 = float(selected["atr_risk"].get("stop_mult", 2.5))
+                        _s2 = max(0.0, r["close"] * (1 - _m2 * _atr2 / 100.0))
+                        if _s2 > 0:
+                            rules.append({"y": _s2,
+                                          "lbl": f"손절 초안 {_fmt_price(r['market'], _s2)}",
+                                          "color": "#ef4444"})
+                    line = alt.Chart(pdf).mark_line(color="#10b981", strokeWidth=1.5).encode(
+                        x=alt.X("date:T", title=None),
+                        y=alt.Y("close:Q", title=None,
+                                scale=alt.Scale(zero=False)),
+                        tooltip=[alt.Tooltip("date:T", title="날짜"),
+                                 alt.Tooltip("close:Q", title="종가", format=",.2f")],
+                    )
+                    rdf = pd.DataFrame(rules)
+                    rule = alt.Chart(rdf).mark_rule(strokeDash=[5, 4]).encode(
+                        y="y:Q", color=alt.Color("color:N", scale=None))
+                    rtxt = alt.Chart(rdf).mark_text(align="left", dx=4, dy=-6,
+                                                    color=txt_color).encode(
+                        y="y:Q", text="lbl:N", x=alt.value(4))
+                    st.altair_chart((line + rule + rtxt).properties(height=260),
+                                    width="stretch")
+                    st.caption("일일 스캔 캐시 시세(지연) — 현재가 기준선이 아니라 *맥락* 확인용입니다.")
     else:
         st.warning("조건을 만족하는 종목이 없습니다. 임계값을 완화해 보세요.")
