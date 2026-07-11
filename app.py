@@ -35,7 +35,7 @@ except Exception:
 
 from screener import engine, snapshot  # noqa: E402
 from screener.data.universe import SECURITY_TYPES, TYPE_LABELS  # noqa: E402
-from screener.filters.base import base_filters, get, optional_filters  # noqa: E402
+from screener.filters.base import base_filters, display_groups, get  # noqa: E402
 from screener.models import Param  # noqa: E402
 
 st.set_page_config(page_title="폭락주 스크리너", layout="wide")
@@ -263,12 +263,17 @@ if cands:
     shown = [c for c in cands
              if c.market in set(sel_markets) and _stype(c) in sel_types]
 
-# ---- Sidebar: optional indicator filters ----
+# ---- Sidebar: optional indicator filters (grouped by pick-priority) ----
 st.sidebar.header("보조지표 필터")
 selected: dict[str, dict] = {}
-for flt in optional_filters():
-    on = st.sidebar.checkbox(flt.label, value=False, key=f"on.{flt.key}", help=flt.description)
-    if on:
+for gi, (gtitle, gfilters) in enumerate(display_groups()):
+    if gi:
+        st.sidebar.divider()
+    st.sidebar.caption(gtitle)
+    for flt in gfilters:
+        on = st.sidebar.checkbox(flt.label, value=False, key=f"on.{flt.key}", help=flt.description)
+        if not on:
+            continue
         with st.sidebar.expander(f"⚙️ {flt.label} 설정", expanded=True):
             params = {p.key: render_param(p, flt.key) for p in flt.params}
             # bonus filters add to the score directly (no weighted-average slot)
