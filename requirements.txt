@@ -1,7 +1,9 @@
 pandas>=2.2
 yfinance>=0.2.40
 finance-datareader>=0.9.90
-streamlit>=1.36
+# 1.57에 핀: on_select/segmented_control/badge/ProgressColumn 등 UI가 의존 +
+# 커스텀 CSS의 data-testid 셀렉터가 버전 간 변할 수 있어 고정
+streamlit>=1.57,<1.58
 requests>=2.31
 python-dotenv>=1.0
 pyarrow>=15.0

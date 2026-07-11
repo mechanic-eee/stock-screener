@@ -11,6 +11,7 @@ import os
 import sys
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 # make src importable when run via `streamlit run app.py`
@@ -38,7 +39,35 @@ from screener.data.universe import SECURITY_TYPES, TYPE_LABELS  # noqa: E402
 from screener.filters.base import base_filters, display_groups, get  # noqa: E402
 from screener.models import Param  # noqa: E402
 
-st.set_page_config(page_title="폭락주 스크리너", layout="wide")
+try:
+    # Streamlit Cloud can serve a fresh app.py against a stale cached submodule
+    # (happened before — see LOG 2026-05-25). Guard the newest import so the app
+    # degrades (no tier colors / 핵심기여) instead of dying until a reboot.
+    from screener.filters.base import label_tiers  # noqa: E402
+except ImportError:  # pragma: no cover — stale-deploy fallback
+    def label_tiers() -> dict:  # type: ignore[misc]
+        return {}
+
+st.set_page_config(page_title="폭락주 스크리너", page_icon="📉", layout="wide",
+                   initial_sidebar_state="auto")
+
+# Global CSS: trim Streamlit's oversized paddings and make the layout usable on
+# phones (640px is Streamlit's own column-stacking breakpoint). Only stable
+# data-testid selectors — never .st-emotion-cache-* (those churn per release).
+st.html("""
+<style>
+[data-testid="stMainBlockContainer"] { padding-top: 2.6rem; padding-bottom: 3rem; }
+@media (max-width: 640px) {
+  /* keep top padding >= the fixed header height or the title hides under it */
+  [data-testid="stMainBlockContainer"] {
+    padding-left: 0.9rem; padding-right: 0.9rem; padding-top: 3.2rem;
+  }
+  /* metric tiles: tighter on small screens */
+  [data-testid="stMetric"] { padding: 0.25rem 0.5rem; }
+  [data-testid="stMetricValue"] { font-size: 1.35rem; }
+}
+</style>
+""")
 
 
 def _secret(key: str, default: str = "") -> str:
@@ -152,8 +181,9 @@ def render_param(p: Param, key_prefix: str):
 st.sidebar.header("기본 스크린")
 base = base_filters()[0]
 base_params = {}
-for p in base.params:
-    base_params[p.key] = render_param(p, "base")
+with st.sidebar:  # render_param uses bare st.* — anchor it to the sidebar
+    for p in base.params:
+        base_params[p.key] = render_param(p, "base")
 
 weights: dict[str, float] = {}
 weights[base.key] = st.sidebar.slider(
@@ -289,7 +319,9 @@ for gi, (gtitle, gfilters) in enumerate(display_groups()):
         on = st.sidebar.checkbox(flt.label, key=f"on.{flt.key}", help=flt.description)
         if not on:
             continue
-        with st.sidebar.expander(f"⚙️ {flt.label} 설정", expanded=True):
+        # collapsed: the group master turns on up to 5 filters at once — five
+        # auto-opened settings panels would swallow the sidebar
+        with st.sidebar.expander(f"⚙️ {flt.label} 설정", expanded=False):
             params = {p.key: render_param(p, flt.key) for p in flt.params}
             # bonus filters add to the score directly (no weighted-average slot)
             if not flt.is_bonus:
@@ -317,8 +349,42 @@ if (any(get(k).needs_fundamentals for k in selected)
     st.sidebar.info("펀더멘털 필터: DART_API_KEY가 없어 KR 종목은 중립(50점, 제외 안 함) 처리됩니다. US는 정상 동작합니다.")
 
 # ---- Main ----
-st.title("📉 5년 고가 대비 폭락주 스크리너")
-st.caption("기본: 종가 기준 N년 최고가 대비 하락률 ≥ 임계. 보조지표는 사이드바에서 켜고 값 조정.")
+def _regime_badges() -> str:
+    """시장 레짐(200일선) 배지 — 점수가 '무엇'이라면 200일선은 '언제'.
+
+    검증(KR, 250d): 지수가 200일선 위에서 배치 −2.8% vs 아래 −16.6%
+    (docs/regime — 일일 알림의 '시장:' 라인과 동일 기준). 벤치마크는 스냅샷
+    사이드카로 primed — 없으면 배지 생략(fail-soft).
+    """
+    try:
+        from screener import benchmark as _bench
+
+        # cached/primed only (peek) — get_benchmark() would live-fetch on a
+        # cache miss and block first paint on the hosted app. getattr guards
+        # the stale-deploy case where the cached module predates peek().
+        _peek = getattr(_bench, "peek", None)
+        if _peek is None:
+            return ""
+        chips = []
+        for mk in ("KR", "US"):
+            s = _peek(mk)
+            if s is None or len(s) < 200:
+                continue
+            above = float(s.iloc[-1]) >= float(s.tail(200).mean())
+            chips.append(
+                f":green-badge[▲ {mk} 200일선 위 · 배치 양호]" if above
+                else f":red-badge[▼ {mk} 200일선 아래 · 신규 배치 주의]"
+            )
+        return "  ".join(chips)
+    except Exception:  # noqa: BLE001 — 배지는 보너스, 앱을 깨뜨리지 않는다
+        return ""
+
+
+st.markdown("## 📉 폭락주 스크리너")
+st.caption("5년 고가 대비 폭락주 중 **회복 가능성 순 랭킹** — 점수는 매수 신호가 아니라 *먼저 볼 순서*입니다.")
+_reg = _regime_badges()
+if _reg:
+    st.markdown(_reg)
 
 if not live_mode:
     _freshness_banner(SNAP_URL or None)
@@ -340,12 +406,14 @@ with st.expander("ℹ️ 점수는 어떻게 매겨지나 · 보조지표 활용
 - **외부 데이터 지표(상대강도·펀더멘털·밸류·뉴스)**는 데이터를 못 받으면 **중립 50점**으로 처리되고 위에 ⚠️ 경고가 떠요 — *"켰는데 안 걸러지는"* 건 버그가 아니라 **데이터 부재 신호**입니다.
 
 #### 🧪 어떤 조합으로 쓰면 좋나 — 폭락주 *회복 후보* 찾기
-사이드바 지표는 **위에서부터 중요한 순서**로 정렬돼 있어요. 차원별로 한 개씩 켜는 게 기본기:
-- 🥇 **가치함정 거르기** — `펀더멘털`(자동제외) · `알트만 Z`(부도위험) · `피오트로스키 F`(재무 개선 중?) → 폭락엔 이유가 있으니 *망해가는 회사부터* 걷어냄
-- 🥈 **싸고 좋은가** — `밸류에이션`(저 PER/PBR) · `퀄리티(매출총이익률)` · `이익의 질(발생액)` → *"빠진 것 ≠ 싼 것"*, 진짜 저평가 우량 분리
-- 🥉 **바닥 다지고 도는가** — `변동성 수축(VCP)` · `상대강도(RS)` · `주봉/일봉 MACD` → falling knife 피하고 전환 타이밍
-- 🛡 **리스크 체크** — `ATR 리스크/손절` → 변동성·권장 손절폭(사이징)
+사이드바 지표는 **선택 우선순위 4그룹**으로 묶여 있어요 (그룹마다 **전체 켜기/끄기** 한 방):
+- 🟢 **핵심 — 항상 켜기**: `펀더멘털`·`피오트로스키 F`·`ATR`·`알트만 Z`·`퀄리티(GP)` — 백테스트로 검증된 엣지 그 자체. **이 그룹 마스터 하나면 검증된 랭킹**이 됩니다.
+- 🔵 **보강**: `밸류에이션`(비싼 것 게이트) · `발행주식수`(희석 회피) · `VCP`(바닥 구조)
+- 🟡 **확증·타이밍**: RS·MACD류·RSI·볼린저·MA·뉴스 — 검증에서 약신호라 낮은 가중
+- ⚪ **예측력 없음**: OBV·거래량·발생액 — 검증 음성, 켜지 않는 게 기본
 
+**표의 `핵심기여` 칼럼** = 점수 중 🟢 엣지 신호의 비중 — 높을수록 *펀더가 받치는 점수*라 믿을 만해요.
+**행을 클릭**하면 아래 `🔍 점수 분해`에서 요소별 기여·ATR 손절 초안까지 확인.
 **후보를 확 줄이려면** 한두 지표의 `통과 최소 점수`를 60~70으로 올려 게이트로 쓰세요.
 
 #### 🔬 백테스트로 검증된 것 (2026-06, point-in-time)
@@ -366,54 +434,258 @@ if not cands:
         st.info("매일 자동 스캔된 **스냅샷**을 불러오세요. 보조지표·가중치는 즉시 반영됩니다.")
 else:
     meta = st.session_state.get("scan_meta", {})
-    st.success(f"후보 {meta.get('n', len(cands))}종목 ({meta.get('src','?')}) · "
-               f"표시 필터·보조지표로 즉시 좁혀집니다.")
     diag: dict[str, list[int]] = {}
     rows = engine.apply_filters(shown, base_params=base_params, selected=selected,
                                 weights=weights, diag=diag)
-    # Warn about any active filter that got no usable data for *every* evaluated
-    # ticker: it fell back to neutral-for-all, so it changes neither the result
-    # count nor the ranking (common on the hosted app where live external fetches
-    # — RS benchmark, valuation, fundamentals — are blocked/rate-limited).
-    for key in selected:
-        d = diag.get(key)
-        if d and d[1] > 0 and d[0] == d[1]:
-            st.warning(
-                f"⚠️ '{get(key).label}' 필터: 필요한 데이터를 가져오지 못해 평가된 전 종목이 "
-                f"중립(50)으로 처리됐습니다 — 결과 수·순위에 영향이 없습니다. "
-                f"(배포 환경에서는 외부 데이터(벤치마크·재무·밸류) 실시간 호출이 차단될 수 있어요.)"
-            )
-    st.subheader(f"결과: {len(rows)}종목 (점수순) · 후보 {len(shown)}/{len(cands)}")
+    # One consolidated notice for filters that got no usable data for *every*
+    # evaluated ticker (neutral-for-all → no effect on count or ranking; common
+    # on the hosted app where live external fetches are blocked).
+    inert = [get(k).label for k in selected
+             if (d := diag.get(k)) and d[1] > 0 and d[0] == d[1]]
+    if inert:
+        st.warning(
+            "⚠️ 데이터를 못 받아 **중립(50) 처리**된 지표 — 순위·결과 수에 영향 없음: "
+            + " · ".join(f"`{lbl}`" for lbl in inert)
+            + "  \n(배포 환경에선 외부 데이터(벤치마크·재무·밸류) 실시간 호출이 차단될 수 있어요.)"
+        )
+
+    _tiers = label_tiers()                      # label -> (tier idx, 핵심/보강/확증/제외)
+    _core_labels = {lbl for lbl, (gi, _s) in _tiers.items() if gi == 0}
+    _groups = display_groups()
+    _core_keys = {f.key for f in _groups[0][1]} if _groups else set()
+
+    def _core_share(r: dict):
+        """점수 중 🟢 핵심(검증 엣지) 신호가 차지하는 비중(%) — '펀더가 받치는 점수' 판별기.
+
+        None = 이 종목은 핵심 신호가 전부 데이터 없음(중립 처리) — 0%(신호가 낮게
+        평가됨)와는 다른 상태라 빈 칸으로 구분한다.
+        """
+        core_parts = [p["기여"] for p in r.get("_parts", []) if p["요소"] in _core_labels]
+        if not core_parts:
+            return None
+        total = r.get("점수") or 0.0
+        if total <= 0:
+            return 0.0
+        return round(sum(core_parts) / total * 100.0)
+
+    def _fmt_price(market: str, v: float) -> str:
+        return f"₩{v:,.0f}" if market == "KR" else f"${v:,.2f}"
+
+    hdr_l, hdr_m, hdr_r = st.columns([5, 3, 2], vertical_alignment="bottom")
+    with hdr_l:
+        st.subheader(f"결과 {len(rows)}종목")
+        st.caption(f"점수순 · 표시 {len(shown)}/{meta.get('n', len(cands))}종목"
+                   f"({meta.get('src', '?')}) · 보조지표 {len(selected)}개 활성"
+                   " · **행을 클릭하면 아래에 점수 분해**")
+    with hdr_m:
+        q = st.text_input("종목 검색", key="table.q", label_visibility="collapsed",
+                          placeholder="🔎 티커/종목명 검색")
+    with hdr_r:
+        view = st.segmented_control("표시 컬럼", ["핵심", "전체"], default="핵심",
+                                    key="table.view", label_visibility="collapsed")
+
+    if not selected and len(rows) > 1:
+        st.info("ℹ️ 지금은 **기본 폭락 점수뿐**이라 동점이 많아 순위 변별력이 없습니다 — "
+                "사이드바 **🟢 핵심 그룹 '전체 켜기'** 하나로 검증된 랭킹(펀더·F·ATR·Altman·GP)이 됩니다.")
+
     if rows:
-        # hide private keys (e.g. _parts, used only for the breakdown below)
-        display_rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
-        front = ["ticker", "name", "market", "점수", "close", "하락률"]
-        cols = front + [c for c in display_rows[0].keys() if c not in front]
-        st.dataframe(display_rows, width="stretch", hide_index=True, column_order=cols)
+        # column visibility follows the *selection* (not rows[0]'s data
+        # availability — a top row with no fundamentals data would otherwise
+        # hide the 핵심기여 column for everyone)
+        core_active = bool(_core_keys & set(selected))
+        for i, r in enumerate(rows, 1):
+            r["_rank"] = i          # global rank, stable across the search filter
+        ql = (q or "").strip().lower()
+        rows_view = [r for r in rows
+                     if not ql
+                     or ql in r["ticker"].lower() or ql in str(r["name"]).lower()]
+        if not rows_view:
+            st.info(f"🔎 '{q}' 검색 결과가 없습니다 — 검색어를 지우면 전체 {len(rows)}종목이 다시 보입니다.")
+            st.stop()
+
+        table_rows = []
+        detail_cols: list[str] = []
+        base_label = base.label
+        for r in rows_view:
+            tr = {"순위": r["_rank"], "ticker": r["ticker"], "name": r["name"],
+                  "market": r["market"], "점수": r["점수"],
+                  "가격": _fmt_price(r["market"], r["close"]), "하락률": r["하락률"]}
+            if core_active:
+                tr["핵심기여"] = _core_share(r)
+            for k, v in r.items():
+                if k.startswith("_") or k in tr or k in ("close", base_label):
+                    continue
+                tr[k] = v
+                if k not in detail_cols:
+                    detail_cols.append(k)
+            table_rows.append(tr)
+
+        front = ["순위", "ticker", "name", "market", "점수"]
+        if core_active:
+            front.append("핵심기여")
+        front += ["가격", "하락률"]
+        cols = front + (detail_cols if view == "전체" else [])
+
+        colcfg: dict[str, object] = {
+            "순위": st.column_config.NumberColumn("순위", width="small", format="%d"),
+            "ticker": st.column_config.TextColumn("티커", width="small", pinned=True),
+            "name": st.column_config.TextColumn("종목명", width="medium"),
+            "market": st.column_config.TextColumn("시장", width="small"),
+            "점수": st.column_config.ProgressColumn(
+                "점수", min_value=0, max_value=100, format="%.1f",
+                help="가중평균 합성점수(0~100) — 매수 신호가 아니라 '먼저 볼 순서'인 랭킹 필터"),
+            "핵심기여": st.column_config.NumberColumn(
+                "핵심기여", format="%.0f%%",
+                help="점수 중 🟢 검증된 엣지(펀더·피오트로스키·ATR·Altman·GP)의 비중 — "
+                     "높을수록 '펀더가 받치는 점수'라 신뢰도가 높습니다"),
+            "가격": st.column_config.TextColumn("현재가", width="small"),
+            "하락률": st.column_config.NumberColumn(
+                "하락률", format="-%.0f%%", help="N년 최고가 대비 낙폭(종가 기준)"),
+        }
+        for lbl in detail_cols:
+            colcfg[lbl] = st.column_config.TextColumn(lbl)
+
+        # Fold a fingerprint of the visible row set into the widget key: Streamlit
+        # keeps a keyed dataframe's positional selection across reruns even when
+        # the data changes, so a shrunken/re-sorted result set would otherwise
+        # leave an orphaned index (crash) or silently select the wrong ticker.
+        import hashlib
+
+        _fp = hashlib.md5("|".join(tr["ticker"] for tr in table_rows).encode()).hexdigest()[:10]
+        event = st.dataframe(
+            table_rows, width="stretch", hide_index=True, column_order=cols,
+            column_config=colcfg, height=min(521, 42 + 35 * len(table_rows)),
+            row_height=35, on_select="rerun", selection_mode="single-row",
+            key=f"results.table.{_fp}",
+        )
+        try:
+            _sel = event.selection.rows  # positional index into table_rows
+        except Exception:  # noqa: BLE001 — older streamlit or no selection support
+            _sel = []
+        # belt-and-braces bounds check on top of the fingerprint key
+        sel_idx = _sel[0] if _sel and _sel[0] < len(rows_view) else 0
+
         st.download_button(
-            "결과 CSV 다운로드",
-            data=_to_csv(display_rows),
+            "⬇ 결과 CSV",
+            data=_to_csv([{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]),
             file_name="screener_results.csv",
             mime="text/csv",
         )
 
-        # ---- Score breakdown: why did this name get this score? ----
-        st.markdown("##### 🔍 점수 분해 — 왜 이 점수인지")
-        opts = {f"{r['name']} ({r['ticker']}) · {r['점수']}점": i for i, r in enumerate(rows)}
-        pick = st.selectbox("종목 선택", list(opts.keys()), key="breakdown.pick")
-        parts = rows[opts[pick]].get("_parts") or []
-        if len(parts) <= 1:
-            st.caption("보조지표를 켜면 각 요소의 기여가 여기 분해됩니다 (지금은 기본 폭락 점수뿐).")
-        else:
-            import pandas as _pd
+        # ---- 🔍 점수 분해 2.0: 행 클릭 → 왜 이 점수인지 ----
+        r = rows_view[sel_idx]
+        parts = r.get("_parts") or []
+        with st.container(border=True):
+            t_l, t_r = st.columns([8, 2], vertical_alignment="center")
+            with t_l:
+                st.markdown(f"#### 🔍 점수 분해 — {r['name']} ({r['ticker']})")
+                stype = TYPE_LABELS.get(r.get("_security_type", ""), "")
+                chips = [f":gray-badge[{r['market']}]"]
+                if stype:
+                    chips.append(f":gray-badge[{stype}]")
+                chips.append(f":orange-badge[고점 대비 −{r['하락률']:.0f}%]")
+                if r.get("_missing"):
+                    chips.append(f":violet-badge[데이터 없음 {len(r['_missing'])}]")
+                st.markdown(" ".join(chips))
+            with t_r:
+                churl = (f"https://finance.naver.com/item/main.naver?code={r['ticker']}"
+                         if r["market"] == "KR"
+                         else f"https://finance.yahoo.com/quote/{r['ticker']}")
+                st.link_button("차트 ↗", churl, width="stretch")
 
-            bdf = _pd.DataFrame(parts)
-            c1, c2 = st.columns([3, 4])
-            with c1:
-                st.dataframe(bdf, hide_index=True, width="stretch")
-            with c2:
-                st.bar_chart(bdf.set_index("요소")["기여"], horizontal=True)
-            st.caption("**기여** = 가중치 × 점수 ÷ Σ가중치 (활성 요소로 정규화). 기여 합 = 점수"
-                       "(카탈리스트 보너스는 정규화 후 가산이라 합이 100을 넘을 수 있음).")
+            scores_all = [x["점수"] for x in rows]
+            med = sorted(scores_all)[len(scores_all) // 2]
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("합성점수", f"{r['점수']:.1f}",
+                      delta=f"{r['점수'] - med:+.1f} vs 중앙값",
+                      help="가중평균 0~100 (카탈리스트 보너스는 가산). 랭킹용 — 절대 매수신호 아님")
+            _cs = _core_share(r)
+            m2.metric("핵심(엣지) 기여", f"{_cs:.0f}%" if _cs is not None else "—",
+                      help="🟢 검증된 엣지 5신호(펀더·F·ATR·Altman·GP)가 점수에서 차지하는 비중. "
+                           "가격만으로 높은 점수는 최상위에서 역전됩니다(검증) — 펀더가 받치는지 확인하세요. "
+                           "'—'는 핵심 지표가 꺼져 있거나 이 종목의 데이터가 없는 상태")
+            m3.metric("순위", f"{r.get('_rank', sel_idx + 1)} / {len(rows)}")
+            _atr = (r.get("_values") or {}).get("atr_risk")
+            if _atr is not None and "atr_risk" in selected:
+                _mult = float(selected["atr_risk"].get("stop_mult", 2.5))
+                # floor at 0 like scripts/to_watchlist.py — extreme-ATR names
+                # would otherwise show a negative 'stop price'
+                _stop = max(0.0, r["close"] * (1 - _mult * _atr / 100.0))
+                if _stop > 0:
+                    m4.metric("ATR 손절 초안", _fmt_price(r["market"], _stop),
+                              delta=f"-{_mult * _atr:.0f}% (ATR {_atr:.1f}%)", delta_color="off",
+                              help=f"현재가 − {_mult}×ATR — 워치리스트 시드와 같은 공식. "
+                                   "변동성이 클수록 손절이 멀어져 포지션을 줄여야 합니다")
+                else:
+                    m4.metric("ATR 손절 초안", "TBD", delta=f"ATR {_atr:.1f}% 과대", delta_color="off",
+                              help="손절폭(배수×ATR)이 가격을 넘어 의미 있는 손절가가 없습니다 — "
+                                   "이런 초고변동 종목은 사이징 자체를 재고하세요")
+            else:
+                m4.metric("ATR 손절 초안", "—",
+                          help="ATR 리스크/손절 지표를 켜면 손절 초안가가 계산됩니다")
+
+            if len(parts) <= 1:
+                st.info("보조지표를 켜면 요소별 기여가 여기 분해됩니다 — 지금은 기본 폭락 점수뿐이에요. "
+                        "사이드바 🟢 핵심 그룹부터 켜보세요.")
+            else:
+                import altair as alt
+
+                bdf = pd.DataFrame(parts)
+                bdf["티어"] = bdf["요소"].map(
+                    lambda l: "보너스" if l.endswith("(보너스)")
+                    else (_tiers.get(l, (None, "기본(낙폭)"))[1] if l in _tiers else "기본(낙폭)"))
+                bdf = bdf.sort_values("기여", ascending=False).reset_index(drop=True)
+
+                tier_domain = ["핵심", "보강", "확증", "제외", "기본(낙폭)", "보너스"]
+                tier_range = ["#10b981", "#3b82f6", "#f59e0b", "#9ca3af", "#94a3b8", "#a855f7"]
+                try:
+                    _dark = st.context.theme.type == "dark"
+                except Exception:  # noqa: BLE001
+                    _dark = True
+                txt_color = "#d1d5db" if _dark else "#374151"
+
+                c1, c2 = st.columns([5, 6])
+                with c1:
+                    enc_y = alt.Y("요소:N", sort=None, title=None,
+                                  axis=alt.Axis(labelLimit=140))
+                    chart = alt.Chart(bdf).mark_bar(cornerRadiusEnd=3).encode(
+                        x=alt.X("기여:Q", title="점수 기여"),
+                        y=enc_y,
+                        color=alt.Color("티어:N",
+                                        scale=alt.Scale(domain=tier_domain, range=tier_range),
+                                        legend=alt.Legend(orient="bottom", title=None,
+                                                          columns=3)),
+                        tooltip=["요소", "티어", "점수", "가중치", "기여"],
+                    )
+                    text = alt.Chart(bdf).mark_text(align="left", dx=4, color=txt_color).encode(
+                        x="기여:Q", y=enc_y, text=alt.Text("기여:Q", format=".1f"))
+                    st.altair_chart((chart + text).properties(
+                        height=max(190, 34 * len(bdf) + 60)), width="stretch")
+                with c2:
+                    bdf2 = bdf.copy()
+                    bdf2["상세"] = bdf2["요소"].map(
+                        lambda l: r.get(l.removesuffix(" (보너스)"), ""))
+                    st.dataframe(
+                        bdf2[["요소", "점수", "가중치", "기여", "상세"]],
+                        hide_index=True, width="stretch",
+                        height=min(421, 42 + 35 * len(bdf2)), row_height=35,
+                        column_config={
+                            "요소": st.column_config.TextColumn("요소", width="medium"),
+                            "점수": st.column_config.ProgressColumn(
+                                "점수", min_value=0, max_value=100, format="%.0f",
+                                help="이 지표가 매긴 0~100점 (가중 전)"),
+                            "가중치": st.column_config.NumberColumn("가중치", format="%.2f"),
+                            "기여": st.column_config.NumberColumn(
+                                "기여", format="%.1f",
+                                help="가중치 × 점수 ÷ Σ가중치 — 합성점수에 실제로 더해진 양"),
+                            "상세": st.column_config.TextColumn("상세"),
+                        },
+                    )
+                if r.get("_missing"):
+                    st.caption("⚪ **데이터 없음(중립 처리, 점수 미반영):** "
+                               + " · ".join(r["_missing"])
+                               + " — 종목 간 분해 요소가 다르면 이 때문입니다.")
+                st.caption("**기여** = 가중치 × 점수 ÷ Σ가중치 (활성 요소로 정규화) · 기여 합 = 점수 "
+                           "(카탈리스트 보너스는 정규화 후 가산이라 100을 넘을 수 있음)")
     else:
         st.warning("조건을 만족하는 종목이 없습니다. 임계값을 완화해 보세요.")

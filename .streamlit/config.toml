@@ -1,0 +1,18 @@
+# Theme — light/dark 모두 정의해 사용자의 시스템/메뉴 테마 선택을 따른다.
+# primaryColor는 버튼·슬라이더·ProgressColumn(점수 막대)에 쓰인다.
+[theme]
+primaryColor = "#10b981"
+baseRadius = "0.6rem"
+chartCategoricalColors = ["#10b981", "#3b82f6", "#f59e0b", "#9ca3af", "#94a3b8", "#a855f7"]
+
+[theme.light]
+dataframeHeaderBackgroundColor = "#f3f4f6"
+
+[theme.dark]
+dataframeHeaderBackgroundColor = "#1b1e24"
+
+[server]
+runOnSave = true
+
+[browser]
+gatherUsageStats = false

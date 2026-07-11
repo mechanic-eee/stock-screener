@@ -21,7 +21,7 @@
 
 ## 구조
 ```
-app.py                 Streamlit 대시보드 (필터 토글·가중치·점수분해)
+app.py                 Streamlit 대시보드 (4그룹 지표 토글·행클릭 점수분해·레짐 배지·모바일 대응)
 scan.py                CLI 스캔
 scripts/
   daily_scan.py        일일 스캔·알림 (GitHub Actions)

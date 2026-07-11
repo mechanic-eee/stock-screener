@@ -34,6 +34,16 @@ def prime(mapping: dict[str, Optional[pd.Series]]) -> None:
             _cache[market] = s
 
 
+def peek(market: str) -> Optional[pd.Series]:
+    """Cached/primed-only lookup — never triggers a live fetch.
+
+    The app's header renders on every rerun; on the hosted app a cache miss in
+    get_benchmark() would block first paint on a (datacenter-blocked) network
+    call. The regime badge therefore only ever *peeks*.
+    """
+    return _cache.get(market)
+
+
 def get_benchmark(market: str, years: int = 2) -> Optional[pd.Series]:
     """Benchmark close series for a market (date-indexed), or None if unavailable."""
     if market in _cache:

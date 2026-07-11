@@ -2,6 +2,7 @@
 
 ## 현재 목표
 종가 기준 5년 고가 대비 폭락주를 기본 후보로 잡고, 보조지표(MACD·RSI·거래량·MA·볼린저·뉴스)를 토글+파라미터 조정으로 얹어 매수 후보를 좁히는 Streamlit 도구. 한국+미국 동시.
+- **(2026-07-12) 앱 UI 2.0 + 텔레그램 수리:** 사이드바 4그룹+마스터, 결과표 column_config(점수바·핵심기여%·검색·핵심/전체 토글·행클릭), 점수분해 2.0(티어색 기여차트·ATR손절초안·데이터없음 표시), 레짐 배지, 모바일 대응(config.toml 테마+CSS), streamlit 1.57 핀. 적대적 리뷰 9건 수정(선택 잔존 IndexError 등). **텔레그램: 코드측 완료 — 남은 건 사용자 3액션**: ①폰에서 봇(@bgyoostockscreener_bot)에 /start ②`.env` TELEGRAM_CHAT_ID를 getUpdates의 숫자 chat.id로 교체 ③`gh secret set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID -R mechanic-eee/stock-screener`(+선택: 레포 변수 APP_URL=호스팅 주소→알림에 링크).
 **현재 상태: 클라우드 배포 완료 + enrichment·뉴스 실사용화 완료** — GitHub(mechanic-eee/stock-screener) + Actions 일일 스캔(평일 22:00 UTC → data 브랜치 스냅샷) + Streamlit Cloud 호스팅(비번 보호). 로컬은 run_app.bat / 바탕화면 아이콘.
 - (2026-05-25 기준) 4개 enrichment(KR/US 밸류·펀더 + RS) 전부 클라우드 스냅샷 prime으로 작동(US 밸류는 .info/fast_info 차단 우회=종가×재무제표 주식수). 뉴스 필터 실사용화: 일일 캐시 + 네이버 KR/NewsAPI US, 호스팅 KR 검증완료. 스크리너→stock-investing 워치리스트 연결(scripts/to_watchlist.py, 지표가중 랭킹). 보조지표 사용법 docs/indicator-guide.md.
 - **다음 세션 후보(전부 선택 백로그):** ③감성모델 교체(KR-FinBERT, 클라우드 부담으로 보류) / LLM 뉴스분류(유료키) / US 뉴스 NEWSAPI_KEY 발급 / 전종목 스캔 런타임 튜닝 / 워치리스트 자동초안 큐레이션.

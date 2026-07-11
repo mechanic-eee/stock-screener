@@ -141,6 +141,14 @@ def apply_filters(
         sscore = w(base.key) * base_out.score
         # per-filter contribution trace for the UI's score breakdown
         parts: list[tuple[str, float, float]] = [(base.label, base_out.score, w(base.key))]
+        # UI diagnostics: which enabled filters had no data for THIS ticker
+        # (neutral, excluded from parts) + each filter's numeric value (e.g.
+        # atr_risk -> ATR% for the stop-draft display). '_'-prefixed keys stay
+        # out of the table/CSV.
+        missing: list[str] = []
+        values: dict[str, float] = {}
+        if base_out.value is not None:
+            values[base.key] = base_out.value
 
         passed = True
         for key in tech_keys:
@@ -148,6 +156,8 @@ def apply_filters(
             out = flt.apply(data, selected[key])
             note(key, out)
             row[flt.label] = out.detail
+            if out.value is not None:
+                values[key] = out.value
             if not out.passed:
                 passed = False
                 break
@@ -155,6 +165,8 @@ def apply_filters(
                 wsum += w(key)
                 sscore += w(key) * out.score
                 parts.append((flt.label, out.score, w(key)))
+            else:
+                missing.append(flt.label)
         if not passed:
             continue
 
@@ -168,6 +180,8 @@ def apply_filters(
             out = flt.apply(data, selected[key])
             note(key, out)
             row[flt.label] = out.detail
+            if out.value is not None:
+                values[key] = out.value
             if not out.passed:
                 passed = False
                 break
@@ -175,6 +189,8 @@ def apply_filters(
                 wsum += w(key)
                 sscore += w(key) * out.score
                 parts.append((flt.label, out.score, w(key)))
+            else:
+                missing.append(flt.label)
         if not passed:
             continue
 
@@ -187,6 +203,8 @@ def apply_filters(
             out = flt.apply(data, selected[key])
             note(key, out)
             row[flt.label] = out.detail
+            if out.value is not None:
+                values[key] = out.value
             if not out.passed:
                 passed = False
                 break
@@ -194,6 +212,8 @@ def apply_filters(
                 wsum += w(key)
                 sscore += w(key) * out.score
                 parts.append((flt.label, out.score, w(key)))
+            else:
+                missing.append(flt.label)
         if not passed:
             continue
 
@@ -214,6 +234,8 @@ def apply_filters(
             out = flt.apply(data, params)
             note(key, out)
             row[flt.label] = out.detail
+            if out.value is not None:
+                values[key] = out.value
             if not out.passed:
                 passed = False
                 break
@@ -221,6 +243,8 @@ def apply_filters(
                 wsum += w(key)
                 sscore += w(key) * out.score
                 parts.append((flt.label, out.score, w(key)))
+            else:
+                missing.append(flt.label)
         if not passed:
             continue
 
@@ -247,6 +271,9 @@ def apply_filters(
         breakdown += [{"요소": f"{lbl} (보너스)", "점수": round(sc, 1), "가중치": 0.0, "기여": round(sc, 1)}
                       for lbl, sc in bonus_parts]
         row["_parts"] = breakdown
+        row["_missing"] = missing
+        row["_values"] = values
+        row["_security_type"] = getattr(data, "security_type", "common")
         results.append(row)
 
     results.sort(key=lambda r: r.get("점수", 0), reverse=True)

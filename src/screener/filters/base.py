@@ -62,6 +62,25 @@ def optional_filters() -> list[Filter]:
     return [f for f in all_filters() if not f.is_base]
 
 
+TIER_SHORT = ["핵심", "보강", "확증", "제외"]
+
+
+def label_tiers() -> dict[str, tuple[int, str]]:
+    """Filter label -> (tier index, short tier name) per _DISPLAY_GROUPS.
+
+    Used by the UI to color/aggregate score contributions by signal tier
+    (핵심 = the validated edge). Labels not in any group (e.g. the base
+    drawdown) are simply absent — callers treat them as '기본'.
+    """
+    out: dict[str, tuple[int, str]] = {}
+    for gi, (_title, keys) in enumerate(_DISPLAY_GROUPS):
+        short = TIER_SHORT[gi] if gi < len(TIER_SHORT) else "기타"
+        for k in keys:
+            if k in _REGISTRY:
+                out[_REGISTRY[k].label] = (gi, short)
+    return out
+
+
 def display_groups() -> list[tuple[str, list[Filter]]]:
     """Optional filters bucketed for the sidebar, in pick-priority order.
 
