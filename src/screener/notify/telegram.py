@@ -28,10 +28,20 @@ def send_message(text: str, parse_mode: Optional[str] = None) -> bool:
             json={"chat_id": chat_id, "text": text, **({"parse_mode": parse_mode} if parse_mode else {})},
             timeout=15,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            # Never log the request URL: it embeds the bot token, and Actions
+            # logs on this public repo are world-readable. API error details
+            # (e.g. "chat not found") are token-free and safe.
+            detail = ""
+            try:
+                detail = str(resp.json().get("description", ""))
+            except Exception:  # noqa: BLE001
+                pass
+            log.error("Telegram send failed: HTTP %s %s", resp.status_code, detail)
+            return False
         return True
     except Exception as e:  # noqa: BLE001
-        log.error("Telegram send failed: %s", e)
+        log.error("Telegram send failed: %s", str(e).replace(token, "***"))
         return False
 
 

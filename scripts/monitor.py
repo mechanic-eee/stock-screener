@@ -25,6 +25,13 @@ try:
 except Exception:
     pass
 
+try:  # local runs: pick up TELEGRAM_*/DART_API_KEY from the project .env
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except Exception:
+    pass
+
 
 def _held_positions() -> list[dict]:
     """보유 상태의 DECISIONS 포지션만 (워치리스트 관심행은 제외)."""

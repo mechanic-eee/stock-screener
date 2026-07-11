@@ -61,12 +61,20 @@ jobs:
           # KR fundamentals/valuation come from DART; without this repo secret the
           # KR enrichment sidecars are unavailable-only (fail-soft). US uses yfinance.
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          # hosted dashboard link appended to the alert (repo variable, optional)
+          APP_URL: ${{ vars.APP_URL }}
           PYTHONUTF8: "1"
+          # dispatch inputs via env (not inline ${{ }} interpolation into the
+          # script) so shell metacharacters in an input can't inject commands
+          # into a step that holds secrets
+          IN_MARKETS: ${{ github.event.inputs.markets || 'KR US' }}
+          IN_TYPES: ${{ github.event.inputs.types || 'common etf etn spac preferred warrant_unit fund' }}
+          IN_MIN_DROP: ${{ github.event.inputs.min_drop || '50' }}
         run: |
           python scripts/daily_scan.py \
-            --markets ${{ github.event.inputs.markets || 'KR US' }} \
-            --types ${{ github.event.inputs.types || 'common etf etn spac preferred warrant_unit fund' }} \
-            --min-drop ${{ github.event.inputs.min_drop || '50' }}
+            --markets $IN_MARKETS \
+            --types $IN_TYPES \
+            --min-drop "$IN_MIN_DROP"
 
       - name: Publish snapshot to data branch
         run: |

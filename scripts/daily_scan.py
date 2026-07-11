@@ -12,6 +12,7 @@ Env/secrets used (all optional): NEWSAPI_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -19,6 +20,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+try:  # local runs: pick up TELEGRAM_*/DART_API_KEY from the project .env
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 except Exception:
     pass
 
@@ -168,7 +176,13 @@ def main() -> int:
         lines.append(f"{i}. [{r['market']}] {r['name']} ({r['ticker']}){new} "
                      f"{r['점수']}점 / {r['하락률']:.0f}% / {r['close']:,}")
     msg = "\n".join(lines)
+    # stdout goes to the public repo's Actions log — print WITHOUT the app URL
+    # (the dashboard address shouldn't be world-readable even though it is
+    # password-gated); only the telegram message carries the tap-through link.
     print(msg, flush=True)
+    app_url = os.environ.get("APP_URL", "").strip()
+    if app_url:
+        msg += f"\n🔗 {app_url}"
     send_message(msg)
 
     # log what we actually alerted so future runs can honor the cooldown

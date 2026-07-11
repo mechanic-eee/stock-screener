@@ -30,6 +30,19 @@ from .models import FundamentalsBundle
 
 log = logging.getLogger(__name__)
 
+
+def _redact(e: object) -> str:
+    """Exception text with the DART key masked.
+
+    requests errors embed the full URL (incl. ``crtfc_key=<KEY>``), and Actions
+    logs on this public repo are world-readable — never log an exception from a
+    DART call without passing it through here.
+    """
+    s = str(e)
+    key = os.getenv("DART_API_KEY", "").strip()
+    return s.replace(key, "***") if key else s
+
+
 REFRESH_DAYS = 80          # financials change at most quarterly
 _YOY_TOLERANCE_DAYS = 60   # how far from "exactly 1 year ago" a YoY match may be
 # Rows cached before this date predate the extended-fundamentals columns
@@ -395,7 +408,7 @@ def _load_corp_map(key: str) -> dict[str, str]:
                 _corp_map = json.loads(_CORP_MAP_PATH.read_text(encoding="utf-8"))
                 return _corp_map
     except Exception as e:  # noqa: BLE001
-        log.warning("DART corp map disk-cache read failed: %s", e)
+        log.warning("DART corp map disk-cache read failed: %s", _redact(e))
 
     # download
     try:
@@ -410,9 +423,9 @@ def _load_corp_map(key: str) -> dict[str, str]:
             _CORP_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
             _CORP_MAP_PATH.write_text(json.dumps(_corp_map), encoding="utf-8")
         except Exception as e:  # noqa: BLE001
-            log.warning("DART corp map disk-cache write failed: %s", e)
+            log.warning("DART corp map disk-cache write failed: %s", _redact(e))
     except Exception as e:  # noqa: BLE001
-        log.warning("DART corp map load failed: %s", e)
+        log.warning("DART corp map load failed: %s", _redact(e))
         _corp_map = {}
     return _corp_map
 
@@ -602,7 +615,7 @@ def _fetch_kr(ticker: str) -> list[dict]:
         rows[0]["audit_qualified"] = _dart_audit_opinion(key, corp)
         rows[0]["risk_event"] = _dart_risk_events(key, corp)
     except Exception as e:  # noqa: BLE001
-        log.warning("DART risk-signal fetch failed %s: %s", ticker, e)
+        log.warning("DART risk-signal fetch failed %s: %s", ticker, _redact(e))
     return rows
 
 
@@ -692,13 +705,13 @@ def get_fundamentals(market: str, ticker: str, use_cache: bool = True,
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
                 else:
-                    log.warning("fundamentals fetch failed %s/%s: %s", market, ticker, e)
+                    log.warning("fundamentals fetch failed %s/%s: %s", market, ticker, _redact(e))
         if not rows:
             return FundamentalsBundle(available=False)
         try:
             _save(conn, ticker, rows)
         except Exception as e:  # noqa: BLE001
-            log.warning("fundamentals cache save failed %s/%s: %s", market, ticker, e)
+            log.warning("fundamentals cache save failed %s/%s: %s", market, ticker, _redact(e))
         return _signals_from_rows(rows, market)
     finally:
         conn.close()

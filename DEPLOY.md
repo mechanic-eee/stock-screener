@@ -52,8 +52,16 @@ git push -u origin main
 | `TELEGRAM_CHAT_ID` | 알림 수신 | 선택 |
 | `NEWSAPI_KEY` | 뉴스 감성 필터 | 선택 |
 
-텔레그램 봇: @BotFather에서 `/newbot` → 토큰 발급, 봇과 대화 시작 후
-`https://api.telegram.org/bot<토큰>/getUpdates`에서 `chat.id` 확인.
+텔레그램 봇: @BotFather에서 `/newbot` → 토큰 발급, **봇과 대화 시작(/start)** 후
+`https://api.telegram.org/bot<토큰>/getUpdates`에서 `chat.id`(숫자) 확인.
+
+> ⚠️ **둘 다 등록해야 발송된다.** 미등록이면 스캔은 성공해도 알림이 Actions 로그에
+> `[telegram-stub]`로만 찍히고 폰으로는 안 온다 — **실패 알림(dead-man-switch)도 침묵**한다.
+> CLI 한 줄: `gh secret set TELEGRAM_BOT_TOKEN -R mechanic-eee/stock-screener` (CHAT_ID 동일).
+> `TELEGRAM_CHAT_ID`는 **숫자**여야 함(getUpdates의 `chat.id`). 봇 사용자명이 아니다.
+
+추가로 **repository variable** `APP_URL`(Settings → Secrets and variables → Actions → Variables)에
+호스팅 앱 주소를 넣으면 일일 알림 맨 아래 `🔗 <앱주소>` 링크가 붙어 폰에서 바로 열 수 있다.
 
 ## 4. Streamlit Community Cloud에 앱 띄우기
 1. https://share.streamlit.io 접속 → GitHub로 로그인 → **Create app**.

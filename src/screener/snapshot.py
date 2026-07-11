@@ -137,7 +137,7 @@ def _read_parquet(src: str) -> Optional[pd.DataFrame]:
 def _sibling(source: Optional[str | Path], name: str) -> str:
     """Resolve a sibling artifact's path/URL next to the candidates snapshot."""
     if source is None:
-        return str(BENCH_PATH)
+        return str(BENCH_PATH.parent / name)
     s = str(source)
     if s.startswith("http://") or s.startswith("https://"):
         return s.rsplit("/", 1)[0] + "/" + name
