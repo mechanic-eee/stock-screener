@@ -264,14 +264,29 @@ if cands:
              if c.market in set(sel_markets) and _stype(c) in sel_types]
 
 # ---- Sidebar: optional indicator filters (grouped by pick-priority) ----
+def _toggle_group(gkey: str, keys: list[str]) -> None:
+    # master checkbox: push its new value down to every filter in the group
+    val = st.session_state[gkey]
+    for k in keys:
+        st.session_state[f"on.{k}"] = val
+
+
 st.sidebar.header("보조지표 필터")
 selected: dict[str, dict] = {}
 for gi, (gtitle, gfilters) in enumerate(display_groups()):
     if gi:
         st.sidebar.divider()
     st.sidebar.caption(gtitle)
+    gkeys = [f.key for f in gfilters]
+    for k in gkeys:
+        st.session_state.setdefault(f"on.{k}", False)
+    st.sidebar.checkbox(
+        "**전체 켜기/끄기**", key=f"grpon.{gi}",
+        on_change=_toggle_group, args=(f"grpon.{gi}", gkeys),
+        help="이 그룹의 지표를 한번에 켜고 끕니다. 이후 개별 체크는 자유롭게 조정하세요.",
+    )
     for flt in gfilters:
-        on = st.sidebar.checkbox(flt.label, value=False, key=f"on.{flt.key}", help=flt.description)
+        on = st.sidebar.checkbox(flt.label, key=f"on.{flt.key}", help=flt.description)
         if not on:
             continue
         with st.sidebar.expander(f"⚙️ {flt.label} 설정", expanded=True):
