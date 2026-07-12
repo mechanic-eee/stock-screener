@@ -689,44 +689,178 @@ else:
                 st.caption("**기여** = 가중치 × 점수 ÷ Σ가중치 (활성 요소로 정규화) · 기여 합 = 점수 "
                            "(카탈리스트 보너스는 정규화 후 가산이라 100을 넘을 수 있음)")
 
-            # ---- 📈 가격 맥락: 캐시된 시계열로 낙폭·손절 초안을 그림으로 ----
+            # ---- 📈 가격 맥락: 캔들 차트(일/주/월) + 보조 패널(거래량·RSI·MACD) ----
             _cand = next((c for c in shown if c.ticker == r["ticker"]), None)
             _px = getattr(_cand, "prices", None) if _cand is not None else None
             if _px is not None and not _px.empty and "close" in _px:
-                with st.expander(f"📈 가격 차트 — {r['ticker']} (스냅샷 시세, 고점·손절 초안 표시)",
-                                 expanded=False):
+                with st.expander(f"📈 가격 차트 — {r['ticker']} (스냅샷 시세)", expanded=False):
                     import altair as alt
 
-                    pdf = _px.reset_index()
-                    date_col = pdf.columns[0]
-                    pdf = pdf.rename(columns={date_col: "date"})[["date", "close"]].dropna()
-                    pdf["date"] = pd.to_datetime(pdf["date"])
-                    peak = float(pdf["close"].max())
-                    rules = [{"y": peak, "lbl": f"최고가 {_fmt_price(r['market'], peak)}",
-                              "color": "#9ca3af"}]
-                    _atr2 = (r.get("_values") or {}).get("atr_risk")
-                    if _atr2 is not None and "atr_risk" in selected:
-                        _m2 = float(selected["atr_risk"].get("stop_mult", 2.5))
-                        _s2 = max(0.0, r["close"] * (1 - _m2 * _atr2 / 100.0))
-                        if _s2 > 0:
-                            rules.append({"y": _s2,
-                                          "lbl": f"손절 초안 {_fmt_price(r['market'], _s2)}",
-                                          "color": "#ef4444"})
-                    line = alt.Chart(pdf).mark_line(color="#10b981", strokeWidth=1.5).encode(
-                        x=alt.X("date:T", title=None),
-                        y=alt.Y("close:Q", title=None,
-                                scale=alt.Scale(zero=False)),
-                        tooltip=[alt.Tooltip("date:T", title="날짜"),
-                                 alt.Tooltip("close:Q", title="종가", format=",.2f")],
-                    )
-                    rdf = pd.DataFrame(rules)
-                    rule = alt.Chart(rdf).mark_rule(strokeDash=[5, 4]).encode(
-                        y="y:Q", color=alt.Color("color:N", scale=None))
-                    rtxt = alt.Chart(rdf).mark_text(align="left", dx=4, dy=-6,
-                                                    color=txt_color).encode(
-                        y="y:Q", text="lbl:N", x=alt.value(4))
-                    st.altair_chart((line + rule + rtxt).properties(height=260),
-                                    width="stretch")
-                    st.caption("일일 스캔 캐시 시세(지연) — 현재가 기준선이 아니라 *맥락* 확인용입니다.")
+                    from screener import indicators as ind
+
+                    UP, DOWN = "#ef4444", "#3b82f6"   # 국내 관행: 빨강=상승, 파랑=하락
+
+                    ctl1, ctl2, ctl3 = st.columns([2, 3, 5])
+                    tf = ctl1.segmented_control(
+                        "봉", ["일", "주", "월"], default="일", key="chart.tf",
+                        label_visibility="collapsed") or "일"
+                    period = ctl2.segmented_control(
+                        "기간", ["6M", "1Y", "2Y", "전체"], default="1Y", key="chart.period",
+                        label_visibility="collapsed") or "1Y"
+                    panels = ctl3.pills(
+                        "보조", ["거래량", "RSI", "MACD", "MA50/200", "볼린저"],
+                        selection_mode="multi", default=["거래량"], key="chart.panels",
+                        label_visibility="collapsed") or []
+
+                    pxx = _px.copy()
+                    pxx.index = pd.to_datetime(pxx.index)
+                    pxx = pxx.sort_index()
+                    if tf != "일":
+                        _agg = {c: f for c, f in
+                                [("open", "first"), ("high", "max"), ("low", "min"),
+                                 ("close", "last"), ("volume", "sum")] if c in pxx.columns}
+                        pxx = (pxx.resample("W-FRI" if tf == "주" else "ME").agg(_agg)
+                                  .dropna(subset=["close"]))
+                    # 지표는 전체 이력으로 계산(기간을 잘라도 MA/RSI가 비지 않게), 표시만 슬라이스
+                    if "MA50/200" in panels:
+                        pxx["ma50"] = ind.sma(pxx["close"], 50)
+                        pxx["ma200"] = ind.sma(pxx["close"], 200)
+                    if "볼린저" in panels:
+                        _bm, _bu, _bl = ind.bollinger(pxx["close"])
+                        pxx["bb_mid"], pxx["bb_up"], pxx["bb_lo"] = _bm, _bu, _bl
+                    if "RSI" in panels:
+                        pxx["rsi"] = ind.rsi(pxx["close"])
+                    if "MACD" in panels:
+                        _mc, _ms, _mh = ind.macd(pxx["close"])
+                        pxx["macd"], pxx["macd_sig"], pxx["macd_hist"] = _mc, _ms, _mh
+                    if period != "전체":
+                        _mo = {"6M": 6, "1Y": 12, "2Y": 24}[period]
+                        pxx = pxx[pxx.index >= pxx.index.max() - pd.DateOffset(months=_mo)]
+
+                    cdf = pxx.reset_index()
+                    cdf = cdf.rename(columns={cdf.columns[0]: "date"})
+                    has_ohlc = ({"open", "high", "low"}.issubset(cdf.columns)
+                                and cdf[["open", "high", "low"]].notna().any().all())
+                    bw = max(1.5, min(14.0, 640.0 / max(len(cdf), 1)))
+                    _upv = alt.value(UP)
+                    _dnv = alt.value(DOWN)
+                    candle_color = alt.condition("datum.close >= datum.open", _upv, _dnv)
+                    price_tt = [alt.Tooltip("date:T", title="날짜")] + [
+                        alt.Tooltip(f"{c}:Q", title=t, format=",.2f")
+                        for c, t in [("open", "시가"), ("high", "고가"),
+                                     ("low", "저가"), ("close", "종가")] if c in cdf.columns]
+
+                    def _x(show_labels: bool):
+                        return alt.X("date:T", title=None,
+                                     axis=alt.Axis(labels=show_labels, ticks=show_labels))
+
+                    def _price_chart(showx: bool):
+                        y_sc = alt.Scale(zero=False)
+                        layers = []
+                        if "볼린저" in panels and "bb_up" in cdf.columns:
+                            layers.append(alt.Chart(cdf).mark_area(opacity=0.08, color=DOWN)
+                                          .encode(x=_x(showx),
+                                                  y=alt.Y("bb_lo:Q", title=None, scale=y_sc),
+                                                  y2="bb_up:Q"))
+                            layers.append(alt.Chart(cdf)
+                                          .mark_line(color=DOWN, strokeWidth=1, opacity=0.5)
+                                          .encode(x=_x(showx), y="bb_mid:Q"))
+                        if has_ohlc:
+                            layers.append(alt.Chart(cdf).mark_rule().encode(
+                                x=_x(showx), y=alt.Y("low:Q", title=None, scale=y_sc),
+                                y2="high:Q", color=candle_color, tooltip=price_tt))
+                            layers.append(alt.Chart(cdf).mark_bar(size=bw).encode(
+                                x=_x(showx), y="open:Q", y2="close:Q",
+                                color=candle_color, tooltip=price_tt))
+                        else:
+                            layers.append(alt.Chart(cdf)
+                                          .mark_line(color="#10b981", strokeWidth=1.5)
+                                          .encode(x=_x(showx),
+                                                  y=alt.Y("close:Q", title=None, scale=y_sc),
+                                                  tooltip=price_tt))
+                        if "MA50/200" in panels and "ma50" in cdf.columns:
+                            layers.append(alt.Chart(cdf).mark_line(color="#f59e0b", strokeWidth=1)
+                                          .encode(x=_x(showx), y="ma50:Q"))
+                            layers.append(alt.Chart(cdf).mark_line(color="#a855f7", strokeWidth=1)
+                                          .encode(x=_x(showx), y="ma200:Q"))
+                        # 기준선: 최고가(표시 구간을 크게 안 눌 때만) + ATR 손절 초안(구간 내일 때만)
+                        _lo_vis = float(cdf["low"].min() if has_ohlc else cdf["close"].min())
+                        _hi_vis = float(cdf["high"].max() if has_ohlc else cdf["close"].max())
+                        marks = []
+                        peak = float(_px["close"].max())
+                        if peak <= _hi_vis * 1.25:
+                            marks.append({"y": peak, "lbl": f"최고가 {_fmt_price(r['market'], peak)}",
+                                          "color": "#9ca3af"})
+                        _atr2 = (r.get("_values") or {}).get("atr_risk")
+                        if _atr2 is not None and "atr_risk" in selected:
+                            _m2 = float(selected["atr_risk"].get("stop_mult", 2.5))
+                            _s2 = max(0.0, r["close"] * (1 - _m2 * _atr2 / 100.0))
+                            if _s2 > 0 and _s2 >= _lo_vis * 0.7:
+                                marks.append({"y": _s2,
+                                              "lbl": f"손절 초안 {_fmt_price(r['market'], _s2)}",
+                                              "color": "#ef4444"})
+                        if marks:
+                            rdf = pd.DataFrame(marks)
+                            layers.append(alt.Chart(rdf).mark_rule(strokeDash=[5, 4])
+                                          .encode(y="y:Q", color=alt.Color("color:N", scale=None)))
+                            layers.append(alt.Chart(rdf)
+                                          .mark_text(align="left", dx=4, dy=-6, color=txt_color)
+                                          .encode(y="y:Q", text="lbl:N", x=alt.value(4)))
+                        return alt.layer(*layers).properties(height=320)
+
+                    def _vol_chart(showx: bool):
+                        col = candle_color if has_ohlc else alt.value("#10b981")
+                        return alt.Chart(cdf).mark_bar(size=bw).encode(
+                            x=_x(showx),
+                            y=alt.Y("volume:Q", title=None, axis=alt.Axis(format="~s")),
+                            color=col,
+                            tooltip=[alt.Tooltip("date:T", title="날짜"),
+                                     alt.Tooltip("volume:Q", title="거래량", format=",.0f")],
+                        ).properties(height=80)
+
+                    def _rsi_chart(showx: bool):
+                        line = alt.Chart(cdf).mark_line(color="#10b981", strokeWidth=1.2).encode(
+                            x=_x(showx),
+                            y=alt.Y("rsi:Q", title=None, scale=alt.Scale(domain=[0, 100])),
+                            tooltip=[alt.Tooltip("date:T", title="날짜"),
+                                     alt.Tooltip("rsi:Q", title="RSI", format=".1f")])
+                        guide = alt.Chart(pd.DataFrame({"y": [30, 70]})).mark_rule(
+                            strokeDash=[4, 4], color="#9ca3af", opacity=0.6).encode(y="y:Q")
+                        return (line + guide).properties(height=100)
+
+                    def _macd_chart(showx: bool):
+                        hist = alt.Chart(cdf).mark_bar(size=bw).encode(
+                            x=_x(showx), y=alt.Y("macd_hist:Q", title=None),
+                            color=alt.condition("datum.macd_hist >= 0", _upv, _dnv))
+                        m1c = alt.Chart(cdf).mark_line(color=DOWN, strokeWidth=1.2).encode(
+                            x=_x(showx), y="macd:Q",
+                            tooltip=[alt.Tooltip("date:T", title="날짜"),
+                                     alt.Tooltip("macd:Q", title="MACD", format=",.2f"),
+                                     alt.Tooltip("macd_sig:Q", title="시그널", format=",.2f")])
+                        s1c = alt.Chart(cdf).mark_line(color="#f59e0b", strokeWidth=1.2).encode(
+                            x=_x(showx), y="macd_sig:Q")
+                        return (hist + m1c + s1c).properties(height=110)
+
+                    charts = [_price_chart]
+                    if ("거래량" in panels and "volume" in cdf.columns
+                            and float(cdf["volume"].fillna(0).abs().sum()) > 0):
+                        charts.append(_vol_chart)
+                    if "RSI" in panels and "rsi" in cdf.columns:
+                        charts.append(_rsi_chart)
+                    if "MACD" in panels and "macd" in cdf.columns:
+                        charts.append(_macd_chart)
+                    for _i, _fn in enumerate(charts):
+                        # x축 라벨은 맨 아래 패널에만 — 위 패널들은 같은 구간을 공유
+                        st.altair_chart(
+                            _fn(_i == len(charts) - 1).configure_axisY(minExtent=50),
+                            width="stretch")
+                    _legend_bits = []
+                    if "MA50/200" in panels:
+                        _legend_bits.append(":orange[━ MA50] :violet[━ MA200]")
+                    if "MACD" in panels:
+                        _legend_bits.append(":blue[━ MACD] :orange[━ 시그널]")
+                    st.caption(("  ·  ".join(_legend_bits) + "  ·  " if _legend_bits else "")
+                               + "캔들: :red[빨강=상승]·:blue[파랑=하락] · 일일 스캔 캐시 시세(지연) — "
+                                 "맥락 확인용입니다.")
     else:
         st.warning("조건을 만족하는 종목이 없습니다. 임계값을 완화해 보세요.")
