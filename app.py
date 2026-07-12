@@ -741,12 +741,26 @@ else:
                     cdf = cdf.rename(columns={cdf.columns[0]: "date"})
                     has_ohlc = ({"open", "high", "low"}.issubset(cdf.columns)
                                 and cdf[["open", "high", "low"]].notna().any().all())
+                    # data-sanity guard: a close outside [low, high] means the bar
+                    # mixes adjustment bases (pre-2026-07-12 snapshots kept raw
+                    # O/H/L with an adjusted close) — candles/tooltips are then
+                    # internally inconsistent. Surface it instead of hiding it.
+                    if has_ohlc:
+                        _incons = float(((cdf["close"] > cdf["high"])
+                                         | (cdf["close"] < cdf["low"])).mean())
+                        if _incons > 0.02:
+                            st.warning(
+                                f"⚠️ 이 스냅샷의 시/고/저가는 수정주가 반영 전 데이터라 "
+                                f"봉·툴팁 값이 서로 안 맞습니다(표시 구간의 {_incons:.0%}). "
+                                "다음 일일 스캔 스냅샷부터 자동으로 정확해져요 — "
+                                "URL의 스냅샷을 새로 불러오면 해결됩니다.")
                     bw = max(1.5, min(14.0, 640.0 / max(len(cdf), 1)))
                     _upv = alt.value(UP)
                     _dnv = alt.value(DOWN)
                     candle_color = alt.condition("datum.close >= datum.open", _upv, _dnv)
+                    _pfmt = ",.0f" if r["market"] == "KR" else ",.2f"
                     price_tt = [alt.Tooltip("date:T", title="날짜")] + [
-                        alt.Tooltip(f"{c}:Q", title=t, format=",.2f")
+                        alt.Tooltip(f"{c}:Q", title=t, format=_pfmt)
                         for c, t in [("open", "시가"), ("high", "고가"),
                                      ("low", "저가"), ("close", "종가")] if c in cdf.columns]
 
