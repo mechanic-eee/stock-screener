@@ -15,6 +15,23 @@ import pandas as pd
 from . import db
 
 
+def screen_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Canonical screening frame — the WHOLE bar in adjusted terms.
+
+    yfinance stores raw OHLC plus Adj Close. Screening must not mix raw
+    open/high/low with the adjusted close: around dividends/splits the close
+    would sit outside [low, high], flipping candle colors and corrupting
+    true-range (ATR). Scale O/H/L by adj_close/close so the bar is internally
+    consistent. KR (FDR) is already fully adjusted, so its factor is 1.
+    """
+    out = df.copy()
+    factor = (out["adj_close"] / out["close"]).where(out["close"] > 0, 1.0).fillna(1.0)
+    for col in ("open", "high", "low"):
+        out[col] = out[col] * factor
+    out["close"] = out["adj_close"]
+    return out[["open", "high", "low", "close", "volume"]]
+
+
 def _stale(fetched_at: str, max_age_days: float) -> bool:
     try:
         fetched = dt.datetime.fromisoformat(fetched_at)
@@ -44,8 +61,7 @@ def load_prices(market: str, ticker: str, max_age_days: float = 1.0) -> Optional
         return None
     df["date"] = pd.to_datetime(df["date"])
     df = df.set_index("date")
-    df["close"] = df["adj_close"]  # screen on adjusted close
-    return df[["open", "high", "low", "close", "volume"]]
+    return screen_frame(df)  # adjusted close + O/H/L scaled to match
 
 
 def save_prices(market: str, ticker: str, df: pd.DataFrame) -> None:

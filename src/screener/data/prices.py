@@ -95,7 +95,5 @@ def get_prices(
         cache.save_prices(market, ticker, df)
     except Exception as e:  # noqa: BLE001 — one bad ticker must not kill the scan
         log.warning("cache save failed %s/%s: %s", market, ticker, e)
-    # return in canonical screening shape (close := adj_close)
-    out = df.copy()
-    out["close"] = out["adj_close"]
-    return out[["open", "high", "low", "close", "volume"]]
+    # canonical screening shape: adjusted close, O/H/L scaled to match
+    return cache.screen_frame(df)
