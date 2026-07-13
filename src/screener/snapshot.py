@@ -83,13 +83,30 @@ def _frame_to_candidates(df: pd.DataFrame) -> list[TickerData]:
 
 
 def load_candidates(source: Optional[str | Path] = None) -> list[TickerData]:
-    """Load candidates from a local parquet path or an http(s) URL."""
+    """Load candidates from a local parquet path or an http(s) URL.
+
+    The remote read retries once (~2s backoff): the daily publish force-pushes
+    the data branch, so a fetch landing in that seconds-wide window can 404
+    transiently — one retry covers it without hiding real outages.
+    """
     src = str(source) if source is not None else str(DEFAULT_PATH)
     if src.startswith("http://") or src.startswith("https://"):
+        import time
+
         import requests
-        resp = requests.get(src, timeout=30)
-        resp.raise_for_status()
-        df = pd.read_parquet(io.BytesIO(resp.content))
+        last_err: Exception | None = None
+        for attempt in range(2):
+            try:
+                resp = requests.get(src, timeout=30)
+                resp.raise_for_status()
+                df = pd.read_parquet(io.BytesIO(resp.content))
+                break
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                if attempt == 0:
+                    time.sleep(2)
+        else:
+            raise last_err  # type: ignore[misc]
     else:
         if not Path(src).exists():
             return []
@@ -420,11 +437,32 @@ def export_health(candidates: list[TickerData], markets: list[str],
             if last_price is None or d > last_price:
                 last_price = d
 
+    # per-market survivor counts + OHLC-consistency share: tripwires for a
+    # single-market outage and for adjustment-base mixing (the 2026-07-12
+    # raw-OHL-vs-adjusted-close incident hit 39% of US rows; healthy baselines
+    # are ~0% US / ~0.9% KR from suspended/기세 rows).
+    per_market = {m: sum(1 for c in candidates if c.market == m) for m in markets}
+    ohlc_bad: dict[str, float] = {}
+    for m in markets:
+        tot = bad = 0
+        for c in candidates:
+            if c.market != m or c.prices is None or c.prices.empty:
+                continue
+            px = c.prices
+            if not {"high", "low", "close"}.issubset(px.columns):
+                continue
+            tot += len(px)
+            bad += int(((px["close"] > px["high"]) | (px["close"] < px["low"])).sum())
+        if tot:
+            ohlc_bad[m] = round(bad / tot, 4)
+
     health = {
         "last_run_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "markets": list(markets),
         "base_survivors": len(candidates),
         "snapshot_tickers": len(candidates),
+        "market_survivors": per_market,
+        "ohlc_inconsistent": ohlc_bad,
         "last_price_date": last_price,
         "fundamentals_available": _avail_ratio(FUND_PATH),
         "valuations_available": _avail_ratio(VAL_PATH),

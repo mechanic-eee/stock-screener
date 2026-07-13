@@ -1,0 +1,40 @@
+name: CI
+
+# Push-time guard for the frozen, backtest-validated config and the app's
+# regression tests — moves detection from the nightly scan to commit time.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Selftest (validated config regression guard)
+        env:
+          PYTHONUTF8: "1"
+        run: python scripts/selftest.py
+
+      - name: App regression tests
+        env:
+          PYTHONUTF8: "1"
+        run: python tests/test_app_selection.py

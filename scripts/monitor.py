@@ -109,12 +109,22 @@ def main() -> int:
         if args.telegram:
             try:
                 from screener.notify.telegram import send_message
-                send_message("🚨 보유종목 thesis-break\n" + "\n".join(alerts))
-                print("  (텔레그램 전송됨)")
+                ok = send_message("🚨 보유종목 thesis-break\n" + "\n".join(alerts))
+                print("  (텔레그램 전송됨)" if ok else "  (⚠️ 텔레그램 전송 실패 — 위 알림을 직접 확인하세요)")
             except Exception as e:  # noqa: BLE001
                 print(f"  (텔레그램 전송 실패: {e})")
     else:
         print("\n✅ 보유종목 전부 정상 — 손절/위험공시 이상 없음.")
+        # Monday heartbeat: '알림 없음'과 '감시가 죽어 있음'을 폰에서 구분할 수
+        # 있게 주 1회 생존 신호를 보낸다 (dead-man 원칙 — 침묵은 성공이 아니다).
+        if args.telegram:
+            import datetime as _dt
+            if _dt.date.today().weekday() == 0:  # Monday
+                try:
+                    from screener.notify.telegram import send_message
+                    send_message("🩺 보유종목 감시 작동 중 — 이번 점검 알림 0건 (주간 하트비트)")
+                except Exception:  # noqa: BLE001
+                    pass
     return 0
 
 

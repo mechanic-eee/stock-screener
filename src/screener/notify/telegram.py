@@ -15,6 +15,30 @@ log = logging.getLogger(__name__)
 API_BASE = "https://api.telegram.org"
 
 
+# Telegram hard limit is 4096 chars/message; an oversized send is HTTP 400 and
+# the WHOLE alert silently vanishes (green job, dead alert). Split on line
+# boundaries with headroom.
+_CHUNK = 3800
+
+
+def _chunks(text: str) -> list[str]:
+    if len(text) <= _CHUNK:
+        return [text]
+    out, cur = [], ""
+    for line in text.split("\n"):
+        if cur and len(cur) + 1 + len(line) > _CHUNK:
+            out.append(cur)
+            cur = line
+        else:
+            cur = f"{cur}\n{line}" if cur else line
+        while len(cur) > _CHUNK:  # single pathological line
+            out.append(cur[:_CHUNK])
+            cur = cur[_CHUNK:]
+    if cur:
+        out.append(cur)
+    return out
+
+
 def send_message(text: str, parse_mode: Optional[str] = None) -> bool:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -22,6 +46,13 @@ def send_message(text: str, parse_mode: Optional[str] = None) -> bool:
         log.warning("TELEGRAM_BOT_TOKEN/CHAT_ID not set; printing instead")
         print(f"[telegram-stub]\n{text}")
         return False
+    parts = _chunks(text)
+    if len(parts) > 1:
+        return all(_send_one(token, chat_id, p, parse_mode) for p in parts)
+    return _send_one(token, chat_id, parts[0], parse_mode)
+
+
+def _send_one(token: str, chat_id: str, text: str, parse_mode: Optional[str] = None) -> bool:
     try:
         resp = requests.post(
             f"{API_BASE}/bot{token}/sendMessage",
@@ -43,16 +74,3 @@ def send_message(text: str, parse_mode: Optional[str] = None) -> bool:
     except Exception as e:  # noqa: BLE001
         log.error("Telegram send failed: %s", str(e).replace(token, "***"))
         return False
-
-
-def format_alert(row: dict) -> str:
-    """Render one screener result row as a concise alert message."""
-    extras = "  ".join(
-        f"{k}:{v}" for k, v in row.items()
-        if k not in {"ticker", "name", "market", "close", "하락률", "점수"}
-    )
-    return (
-        f"🎯 [{row.get('market')}] {row.get('name')} ({row.get('ticker')})\n"
-        f"점수 {row.get('점수')}/100 · 종가 {row.get('close')} · {row.get('하락률'):.0f}%\n"
-        f"  {extras}"
-    )

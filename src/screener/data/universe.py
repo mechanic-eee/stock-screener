@@ -197,6 +197,17 @@ def build_universe(
         if not use_cache or not cache.market_fresh(m):
             log.info("building %s universe...", m)
             rows = list_kr() if m == "KR" else list_us()
+            # Fail-loud floor: an empty/near-empty listing (source outage) must
+            # NOT overwrite the cached universe — save_market_universe DELETEs
+            # the market's rows and stamps it fresh for 7 days, which would
+            # silently drop the whole market from a week of scans/alerts.
+            # Floors sit far below normal (KR ~1.4K, US ~5K listed rows).
+            floor = 500 if m == "KR" else 2000
+            if len(rows) < floor:
+                raise RuntimeError(
+                    f"{m} universe listing returned {len(rows)} rows "
+                    f"(< floor {floor}) — source outage? keeping the cached "
+                    "universe instead of overwriting it")
             cache.save_market_universe(m, rows)
 
     cached = cache.load_universe() or []

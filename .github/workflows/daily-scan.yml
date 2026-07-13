@@ -39,17 +39,26 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Persist the SQLite price cache between runs so we don't refetch
-      # everything from scratch each day.
-      # Fixed key so the cache actually hits day-to-day. A run_id key never
-      # exact-matches, so every run was a cache miss -> full refetch (the cause
-      # of the 8min vs 1h11m runtime swing). actions/cache still updates the
-      # entry at job end, so the DB stays fresh.
+      # Guard the frozen, backtest-validated weights + pipeline invariants
+      # BEFORE scanning: a broken registry/weight revert should fail the job
+      # (and fire the dead-man ping) instead of publishing a bad snapshot.
+      - name: Selftest (validated config regression guard)
+        env:
+          PYTHONUTF8: "1"
+        run: python scripts/selftest.py
+
+      # Persist the SQLite cache between runs. NOTE: actions/cache@v4 does NOT
+      # re-save on an exact primary-key hit, so a fixed key froze the DB at its
+      # first save (2026-06-23) — cooldown/alert history was silently discarded
+      # every run. Split restore/save with a per-run key + always-save: each run
+      # starts from the newest cache (restore-keys prefix match) and saves its
+      # own updated copy. Prices still refetch daily by design (max_age 1d);
+      # what must persist is cooldown state + 80-day fundamentals + universe.
       - name: Restore price cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data/screener.db
-          key: screener-db-v1
+          key: screener-db-${{ github.run_id }}
           restore-keys: |
             screener-db-
 
@@ -75,6 +84,15 @@ jobs:
             --markets $IN_MARKETS \
             --types $IN_TYPES \
             --min-drop "$IN_MIN_DROP"
+
+      # Save even on failure/timeout: partial fetch progress + cooldown state
+      # from a broken run still shortens the next run.
+      - name: Save price cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/screener.db
+          key: screener-db-${{ github.run_id }}
 
       - name: Publish snapshot to data branch
         run: |
