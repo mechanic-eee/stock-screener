@@ -25,10 +25,14 @@ except Exception:
     pass
 
 # Streamlit Cloud exposes secrets via st.secrets, not as environment variables.
-# Bridge scalar secrets into os.environ so modules that read os.getenv
-# (DART_API_KEY, NEWSAPI_KEY, telegram tokens, ...) see them on the hosted app.
+# Bridge ONLY the keys that modules actually read via os.getenv — an allowlist,
+# not a blanket copy: APP_PASSWORD/SNAPSHOT_URL must not land in os.environ
+# where any env-dumping library or subprocess would inherit them.
+_ENV_BRIDGE = ("DART_API_KEY", "NEWSAPI_KEY", "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET",
+               "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 try:
-    for _k, _v in st.secrets.items():
+    for _k in _ENV_BRIDGE:
+        _v = st.secrets.get(_k) if hasattr(st.secrets, "get") else None
         if isinstance(_v, str) and _k not in os.environ:
             os.environ[_k] = _v
 except Exception:
@@ -80,23 +84,42 @@ def _secret(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 
+@st.cache_resource
+def _gate_state() -> dict:
+    """Process-global login-failure state — session_state would reset on every
+    reconnect, so an attacker could bypass a per-session backoff by reopening
+    the socket. Global lockout is acceptable fail-closed for a single-user app."""
+    return {"fails": 0, "until": 0.0}
+
+
 def _check_password() -> bool:
     """Gate the app behind a password if APP_PASSWORD secret is set.
 
     No secret -> open (local dev). Returns True when access is granted.
     """
+    import hmac
+    import time as _time
+
     pw = _secret("APP_PASSWORD", "")
     if not pw:
         return True
     if st.session_state.get("_authed"):
         return True
     st.title("🔒 폭락주 스크리너")
+    gate = _gate_state()
+    if _time.time() < gate["until"]:
+        st.error("시도가 너무 많습니다 — 잠시 후 다시 시도하세요.")
+        st.stop()
     entered = st.text_input("비밀번호", type="password")
     if entered:
-        if entered == pw:
+        if hmac.compare_digest(entered, pw):
+            gate["fails"], gate["until"] = 0, 0.0
             st.session_state["_authed"] = True
             st.rerun()
         else:
+            gate["fails"] += 1
+            if gate["fails"] > 8:  # exponential backoff after repeated failures
+                gate["until"] = _time.time() + min(2 ** (gate["fails"] - 8), 300)
             st.error("비밀번호가 틀렸습니다.")
     st.stop()
 
@@ -117,18 +140,34 @@ def _to_csv(rows: list[dict]) -> str:
     return buf.getvalue()
 
 
+# Cached remote reads: the sidebar caption + freshness banner run on EVERY
+# Streamlit rerun (each click/keystroke), and snapshot_meta downloads the FULL
+# ~40MB candidates parquet just to count rows. health.json carries the same
+# fields at ~1KB; ttl self-refreshes after the daily publish.
+@st.cache_data(ttl=900, show_spinner=False)
+def _health_cached(source) -> dict:
+    return snapshot.load_health(source)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _meta_cached(source) -> dict:
+    # fallback for pre-health snapshots only — this is the expensive call
+    return snapshot.snapshot_meta(source)
+
+
 def _freshness_banner(source) -> None:
     """Dead-man-switch banner: surface a succeeded-but-stale snapshot.
 
     A green Actions run only means the script didn't crash. This reads the
     health sidecar (falling back to snapshot meta) and shows a loud warning when
-    the price data is old, with how to diagnose it.
+    the price data is old, with how to diagnose it. Warn thresholds mirror the
+    Telegram health line (daily_scan) so the two trust surfaces can't disagree.
     """
     from datetime import date
 
-    h = snapshot.load_health(source)
+    h = _health_cached(source)
     last_run = h.get("last_run_utc")
-    last_price = h.get("last_price_date") or snapshot.snapshot_meta(source).get("last_date")
+    last_price = h.get("last_price_date") or _meta_cached(source).get("last_date")
 
     stale_days = None
     if last_price:
@@ -149,14 +188,22 @@ def _freshness_banner(source) -> None:
         parts.append(f"펀더 {fa:.0%}")
     if va is not None:
         parts.append(f"밸류 {va:.0%}")
+    sf = h.get("signal_fill") or {}
+    fill = min(sf.values()) if sf else None
+    if fill is not None:
+        parts.append(f"신규신호 {fill:.0%}")
     info = " · ".join(parts)
 
+    degraded = ((fa is not None and fa < 0.8) or (fill is not None and fill < 0.5))
     if stale_days is not None and stale_days > 5:
         st.error(
             f"⚠️ 스냅샷이 오래됐습니다 — 마지막 시세가 {stale_days}일 전. 일일 스캔이 멈췄을 수 "
             f"있어요. 진단: `gh run list`(Actions 성공 여부) · `git fetch origin data`(원격 신선도). "
             + (f"\n\n{info}" if info else "")
         )
+    elif degraded:
+        st.warning(f"⚠️ 데이터 품질 저하 — {info} (펀더 커버리지/신규신호 채움률이 낮아 "
+                   "펀더 신호가 부분적으로 중립 처리될 수 있어요)")
     elif info:
         st.caption(f"🟢 {info}")
 
@@ -209,7 +256,17 @@ source = st.sidebar.radio(
 live_mode = source.startswith("라이브")
 years = base_params.get("years", 5)
 
+def _bump_generation() -> None:
+    """Invalidate the apply_filters memo — call at every candidates assignment."""
+    st.session_state["gen"] = st.session_state.get("gen", 0) + 1
+
+
+_hosted = _secret("HOSTED", "") == "1"
+
 if live_mode:
+    if _hosted:
+        st.sidebar.info("라이브 스캔은 **로컬 전용**입니다 — 호스팅 환경에선 시세 수집이 "
+                        "차단돼 결과가 비어요. 로컬 앱(run_app.bat)에서 사용하세요.")
     markets = st.sidebar.multiselect("시장", ["KR", "US"], default=["KR", "US"])
     type_labels = st.sidebar.multiselect(
         "종목 유형", [TYPE_LABELS[t] for t in SECURITY_TYPES], default=[TYPE_LABELS["common"]],
@@ -219,7 +276,7 @@ if live_mode:
     include_types = [_label_to_type[lbl] for lbl in type_labels] or ["common"]
     limit = st.sidebar.number_input("스캔 종목 수 제한 (0=전체)", 0, 10000, 200, step=50,
                                     help="처음엔 작게. 전체 스캔은 오래 걸립니다.")
-    if st.sidebar.button("🔄 라이브 스캔", type="primary"):
+    if st.sidebar.button("🔄 라이브 스캔", type="primary", disabled=_hosted):
         if not markets:
             st.sidebar.error("시장을 하나 이상 선택하세요.")
         else:
@@ -228,23 +285,46 @@ if live_mode:
             def cb(i, total, ticker):
                 prog.progress(i / total, text=f"{i}/{total}  {ticker}")
 
-            cands = engine.build_candidates(
+            new_cands = engine.build_candidates(
                 markets, base_params=base_params, years=int(years),
                 limit=(int(limit) or None), progress_cb=cb, include_types=include_types,
             )
             prog.empty()
-            st.session_state["candidates"] = cands
-            st.session_state["scan_meta"] = {"src": "라이브", "n": len(cands)}
+            # 0-row scan must NOT wipe an already-loaded snapshot (typical on a
+            # host where fetches are blocked): keep the old candidates.
+            if not new_cands and st.session_state.get("candidates"):
+                st.sidebar.error("라이브 스캔 결과 0종목 — 이전에 로드된 후보를 유지합니다. "
+                                 "(호스팅 환경에선 시세 fetch가 차단됩니다)")
+            else:
+                st.session_state["candidates"] = new_cands
+                st.session_state["scan_meta"] = {"src": "라이브", "n": len(new_cands)}
+                _bump_generation()
 else:
-    smeta = snapshot.snapshot_meta(SNAP_URL or None)
-    if smeta.get("tickers"):
-        st.sidebar.caption(f"스냅샷 {smeta['tickers']}종목 · 최종 {smeta.get('last_date','?')} · "
-                           f"{'+'.join(smeta.get('markets', []))}")
+    # sidebar caption from the ~1KB health.json (cached), NOT snapshot_meta —
+    # that call downloads the full ~40MB parquet and used to run every rerun.
+    _h = _health_cached(SNAP_URL or None)
+    _n_tk, _lastd = _h.get("snapshot_tickers"), _h.get("last_price_date")
+    _mkts = _h.get("markets") or []
+    if not _n_tk:  # pre-health snapshot: one cached expensive fallback
+        _sm = _meta_cached(SNAP_URL or None)
+        _n_tk, _lastd, _mkts = _sm.get("tickers"), _sm.get("last_date"), _sm.get("markets", [])
+    if _n_tk:
+        st.sidebar.caption(f"스냅샷 {_n_tk}종목 · 최종 {_lastd or '?'} · {'+'.join(_mkts)}")
     if st.sidebar.button("📥 최신 스냅샷 불러오기", type="primary") or (
         st.session_state.get("candidates") is None and snap_available
     ):
         with st.spinner("스냅샷 로드 중…"):
-            loaded = snapshot.load_candidates(SNAP_URL or None)
+            # fail-soft: a transient raw.githubusercontent blip (or the daily
+            # force-push race) must show a clean retry message, not a traceback
+            # (requests errors embed the snapshot URL). Previously loaded
+            # candidates survive because we only assign on success.
+            try:
+                loaded = snapshot.load_candidates(SNAP_URL or None)
+            except Exception as e:  # noqa: BLE001
+                st.error(f"스냅샷 로드 실패({type(e).__name__}) — 일시적 네트워크 오류일 수 "
+                         "있어요. 잠시 후 **📥 최신 스냅샷 불러오기**를 다시 눌러주세요. "
+                         "(지속되면 `gh run list`로 일일 스캔 상태 확인)")
+                loaded = None
 
             # Prime the enrichment caches from the sidecars so relative-strength,
             # valuation and fundamentals work on the host without live fetches
@@ -266,13 +346,16 @@ else:
                     st.sidebar.caption(f"⚠️ 사전계산 로드 일부 실패: {type(e).__name__}")
                     return {}
 
-            primed = _prime("prime_benchmarks")
-            primed_val = _prime("prime_valuations")
-            primed_fund = _prime("prime_fundamentals")
-        st.session_state["candidates"] = loaded
-        st.session_state["scan_meta"] = {"src": "스냅샷", "n": len(loaded),
-                                          "bench": sorted(primed.keys())}
-        st.session_state["primed"] = {"val": len(primed_val), "fund": len(primed_fund)}
+            if loaded is not None:
+                primed = _prime("prime_benchmarks")
+                primed_val = _prime("prime_valuations")
+                primed_fund = _prime("prime_fundamentals")
+        if loaded is not None:
+            st.session_state["candidates"] = loaded
+            st.session_state["scan_meta"] = {"src": "스냅샷", "n": len(loaded),
+                                             "bench": sorted(primed.keys())}
+            st.session_state["primed"] = {"val": len(primed_val), "fund": len(primed_fund)}
+            _bump_generation()
 
 cands = st.session_state.get("candidates")
 
@@ -434,9 +517,26 @@ if not cands:
         st.info("매일 자동 스캔된 **스냅샷**을 불러오세요. 보조지표·가중치는 즉시 반영됩니다.")
 else:
     meta = st.session_state.get("scan_meta", {})
-    diag: dict[str, list[int]] = {}
-    rows = engine.apply_filters(shown, base_params=base_params, selected=selected,
-                                weights=weights, diag=diag)
+    # Memoize the full-list scoring pass: every rerun (row click, search
+    # keystroke, chart toggle) re-enters this script, and apply_filters over
+    # ~1.5-2k tickers costs seconds on Cloud CPU. Keyed on everything that can
+    # change the result; the generation counter (bumped at both candidates-
+    # assignment sites) invalidates on any reload, so no staleness path exists.
+    import json as _json
+
+    _memo_key = _json.dumps({
+        "gen": st.session_state.get("gen", 0),
+        "base": base_params, "sel": selected, "w": weights,
+        "mkts": sorted(sel_markets), "types": sorted(sel_types),
+    }, sort_keys=True, ensure_ascii=False, default=str)
+    _memo = st.session_state.get("_rows_memo")
+    if _memo is not None and _memo.get("key") == _memo_key:
+        rows, diag = _memo["rows"], _memo["diag"]
+    else:
+        diag = {}
+        rows = engine.apply_filters(shown, base_params=base_params, selected=selected,
+                                    weights=weights, diag=diag)
+        st.session_state["_rows_memo"] = {"key": _memo_key, "rows": rows, "diag": diag}
     # One consolidated notice for filters that got no usable data for *every*
     # evaluated ticker (neutral-for-all → no effect on count or ranking; common
     # on the hosted app where live external fetches are blocked).
@@ -876,5 +976,16 @@ else:
                     st.caption(("  ·  ".join(_legend_bits) + "  ·  " if _legend_bits else "")
                                + "캔들: :red[빨강=상승]·:blue[파랑=하락] · 일일 스캔 캐시 시세(지연) — "
                                  "맥락 확인용입니다.")
+
+            # ---- ➡ 발굴에서 루프로: 다음 단계 명령을 복사해 가게 ----
+            with st.expander("➡ 워치리스트/결정 루프로 보내기", expanded=False):
+                st.caption("검토가 끝났으면 **로컬 터미널**(작업 vault)에서 실행 — "
+                           "발굴 → ② 선별 → ③ 결정·사이징 → ④ 추적 → ⑤ 감시 루프의 다음 단계입니다.")
+                st.code(f"python scripts/to_watchlist.py --tickers {r['ticker']}",
+                        language="bash")
+                st.code(f"python scripts/decide.py --ticker {r['ticker']} --dry-run",
+                        language="bash")
+                st.caption("워치리스트에 논거·진입구간을 채운 뒤 decide로 사이징·기록 — "
+                           "상세: `stock-investing/워크플로.md`")
     else:
         st.warning("조건을 만족하는 종목이 없습니다. 임계값을 완화해 보세요.")

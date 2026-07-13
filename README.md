@@ -61,7 +61,8 @@ copy .env.example .env   # DART_API_KEY / NewsAPI / 텔레그램 (선택)
 
 python -m streamlit run app.py            # 대시보드
 python scripts/selftest.py                # 검증된 설정·파이프라인 점검 (~1s)
-python scripts/daily.ps1                  # 일일 리뷰 (track + monitor)
+pwsh scripts/daily.ps1                    # 일일 리뷰 (track + monitor)
+pwsh scripts/register-daily-task.ps1      # 평일 08:10 자동 리뷰 등록 (감시 자동화)
 
 # 점수 검증 재현 (시세·EDGAR/DART 캐시 필요)
 python backtest/composite_decile_backtest.py --market KR --fundamentals dart

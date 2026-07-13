@@ -89,7 +89,7 @@
 
 - **앱(인터랙티브):** 사이드바 토글 → 즉시 재계산. 탐색·튜닝에 최적. 바탕화면 "폭락주 스크리너" 아이콘으로 실행(최신 클라우드 스냅샷 로드).
 - **워치리스트 시드(`scripts/to_watchlist.py`):** 같은 지표 엔진으로 상위 N을 골라 워치리스트로 전송.
-  - 예: `python scripts/to_watchlist.py --indicators relative_strength fundamental altman_z piotroski --top 10`
+  - 기본 랭킹 = **일일 알림과 같은 검증 세트**(`fundamental valuation altman_z piotroski gross_profit atr_risk`) — 그냥 `python scripts/to_watchlist.py --top 10`이면 된다. base-only는 `--base-only`(비권장, 동전던지기).
   - `--list-indicators`로 지표 키 확인, `--weights key=w,...`로 가중 오버라이드, `--dry-run`으로 미리보기.
 
 ---

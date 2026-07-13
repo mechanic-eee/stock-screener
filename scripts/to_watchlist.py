@@ -248,9 +248,15 @@ def main() -> int:
     ap.add_argument("--min-score", type=float, default=0.0, help="only send candidates at/above this score")
     ap.add_argument("--market", nargs="+", choices=["KR", "US"], help="restrict to these markets")
     ap.add_argument("--tickers", help="comma-separated tickers to send (overrides --top selection)")
-    ap.add_argument("--indicators", nargs="+", metavar="KEY",
+    ap.add_argument("--indicators", nargs="+", metavar="KEY", default=None,
                     help="rank by base + these indicators (or 'all'); each uses its default params "
-                         "so it both scores and gates. Snapshot source only. --list-indicators to see keys.")
+                         "so it both scores and gates. Snapshot source only. --list-indicators to see keys. "
+                         "기본값(미지정): 일일 알림과 동일한 검증 세트 "
+                         "(fundamental valuation altman_z piotroski gross_profit atr_risk) — "
+                         "base-only 랭킹은 검증상 동전던지기라 --base-only로만 선택 가능.")
+    ap.add_argument("--base-only", action="store_true",
+                    help="지표 없이 기본 낙폭 점수로만 랭킹 (비권장 — 코호트 실측: base 5/25 "
+                         "시드 −10.7%%/승률30%% vs enrichment 6/25 +4.0%%/70%%, LOG 2026-07-11)")
     ap.add_argument("--weights", metavar="key=w,...", help="override indicator weights, e.g. relative_strength=0.3,fundamental=0.4")
     ap.add_argument("--list-indicators", action="store_true", help="print available indicator keys and exit")
     ap.add_argument("--min-drop", type=int, default=50, help="base drawdown %% (must match the snapshot)")
@@ -274,7 +280,22 @@ def main() -> int:
         print("ERROR: --indicators는 가격 데이터가 필요해 스냅샷 소스에서만 동작합니다 (--csv와 함께 못 씀).", flush=True)
         return 1
 
-    selected = _resolve_indicators(args.indicators) if args.indicators else {}
+    # Default ranking = the validated daily-alert enrichment set (mirrors
+    # daily_scan --alert-indicators). Resolved AFTER the source branch: CSV rows
+    # already carry the app's composite 점수, so csv -> no indicator pass.
+    # base-only is opt-in only — the cohort tracking measured its damage.
+    ALERT_SET = ["fundamental", "valuation", "altman_z", "piotroski",
+                 "gross_profit", "atr_risk"]
+    indicators_arg = args.indicators
+    if indicators_arg is None and not args.csv:
+        if args.base_only:
+            indicators_arg = None
+            print("⚠️ base-only 랭킹 — 검증상 동전던지기입니다 (base 코호트 −10.7%/30% vs "
+                  "enrichment +4.0%/70%, LOG 2026-07-11).", flush=True)
+        else:
+            indicators_arg = ALERT_SET
+
+    selected = _resolve_indicators(indicators_arg) if indicators_arg else {}
     weights = _parse_weights(args.weights)
 
     if args.csv:
@@ -296,7 +317,9 @@ def main() -> int:
         selected = [r for r in rows if r["ticker"] in wanted]
         missing = wanted - {r["ticker"] for r in selected}
         if missing:
-            print(f"⚠️  not found in source: {', '.join(sorted(missing))}", flush=True)
+            print(f"⚠️  소스에서 못 찾음: {', '.join(sorted(missing))} — 스냅샷에 없거나 "
+                  "지표 게이트(치명 펀더신호 등)에서 탈락했을 수 있습니다. "
+                  "게이트 탈락 여부 확인: --base-only로 재실행해 보세요.", flush=True)
     else:
         selected = rows[: args.top]
 

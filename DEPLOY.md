@@ -70,7 +70,8 @@ git push -u origin main
 4. **Secrets** (앱 설정의 Secrets, TOML 형식)에 입력:
    ```toml
    SNAPSHOT_URL = "https://raw.githubusercontent.com/mechanic-eee/stock-screener/data/candidates.parquet"
-   APP_PASSWORD = "원하는_비밀번호"   # 설정하면 접속 시 비번 요구. 빼면 공개.
+   APP_PASSWORD = "원하는_비밀번호"   # 설정하면 접속 시 비번 요구. 빼면 공개. 길고 랜덤하게.
+   HOSTED = "1"                      # 호스팅 표시 — 라이브 스캔 버튼 비활성(차단 환경 안내)
    # NEWSAPI_KEY = "..."             # 앱에서 뉴스 필터 쓸 거면
    ```
 5. Deploy. 앱 URL이 나온다 → **어디서든 접속**. 비번을 걸었으면 입력해야 들어감.
@@ -85,3 +86,13 @@ git push -u origin main
 
 ## 로컬은 그대로
 로컬에서는 바탕화면 아이콘(`run_app.bat`)으로 계속 실행 가능하고, 사이드바 "데이터 소스 → 라이브 스캔"으로 즉석 스캔도 된다. 클라우드 앱은 "스냅샷" 모드로 동작.
+
+## (선택) 보유종목 감시 자동화 — 로컬 스케줄러
+포지션(DECISIONS.md)은 로컬 전용이라 Actions로 감시할 수 없다. 대신:
+```powershell
+pwsh scripts/register-daily-task.ps1        # 평일 08:10, track+monitor(-Telegram) 자동 실행
+pwsh scripts/register-daily-task.ps1 -Unregister   # 해제
+```
+노트북이 꺼져 있던 시간대면 **깨어난 직후 따라잡아 실행**(StartWhenAvailable)되고, 로그는
+`stock-investing/monitor-log.txt`. 월요일마다 "감시 작동 중" 하트비트가 텔레그램으로 온다
+(침묵=고장과 침묵=이상없음을 구분).

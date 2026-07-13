@@ -8,6 +8,17 @@
 param([switch]$Telegram)
 
 $ErrorActionPreference = "Continue"
+
+# Append a transcript so a scheduled (hidden-window) run is diagnosable; keep
+# the log bounded (~200KB) so it never grows unattended.
+$logPath = Join-Path $PSScriptRoot "..\..\stock-investing\monitor-log.txt"
+try {
+    if ((Test-Path $logPath) -and ((Get-Item $logPath).Length -gt 200KB)) {
+        Get-Content $logPath -Tail 500 | Set-Content $logPath -Encoding utf8
+    }
+    Start-Transcript -Path $logPath -Append | Out-Null
+} catch {}
+
 $py = Join-Path $PSScriptRoot "..\.venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { $py = "python" }
 
@@ -23,3 +34,5 @@ Write-Host "`n=== REMINDER ===" -ForegroundColor Yellow
 Write-Host " - Curate WATCHLIST 보류 rows (fill thesis/stop/catalyst, set 관심)."
 Write-Host " - Record buys/exits:  decide.py --ticker <T> [--action 청산 --exit <px>]"
 Write-Host " - Deploy when the index is above its 200DMA (see the daily alert 시장: line)."
+
+try { Stop-Transcript | Out-Null } catch {}
