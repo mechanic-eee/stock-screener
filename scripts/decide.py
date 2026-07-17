@@ -124,6 +124,9 @@ def main() -> int:
     ap.add_argument("--account", type=float, help="계좌 크기 (기본: portfolio.json/내장)")
     ap.add_argument("--note", default="", help="논거/사유 (관망이면 필수에 가깝다)")
     ap.add_argument("--date", default=date.today().isoformat(), help="결정 날짜 (기본: 오늘)")
+    ap.add_argument("--paper", action="store_true",
+                    help="페이퍼 트레이드로 기록(상태 '보유(페이퍼)') — track가 실계좌와 분리 집계. "
+                         "추천 파이프라인 첫 8주 페이퍼 우선 원칙용")
     ap.add_argument("--dry-run", action="store_true", help="쓰지 않고 미리보기")
     args = ap.parse_args()
 
@@ -143,7 +146,7 @@ def main() -> int:
                 continue
             entry = _parse_price(c[3])
             ret = ((args.exit_px - entry) / entry * 100.0) if entry else None
-            c[8] = "청산"
+            c[8] = "청산(페이퍼)" if "페이퍼" in c[8] else "청산"
             c[9] = f"{ecell(args.exit_px)} ({ret:+.1f}%)" if ret is not None else ecell(args.exit_px)
             lines[i] = "| " + " | ".join(c) + " |"
             print(f"📌 청산: {args.ticker} @ {ecell(args.exit_px)}"
@@ -200,7 +203,7 @@ def main() -> int:
         print(f"❌ {r['reason']}")
         return 1
 
-    print(f"[{market}] {name}  ({args.action})")
+    print(f"[{market}] {name}  ({args.action}{' · 페이퍼' if args.paper else ''})")
     print(f"  진입 {fmt(entry)} · 손절 {fmt(stop)} (-{r['stop_pct']:.1f}%) · "
           f"계좌 {fmt(account)} · 리스크 {args.risk:.1f}%" + (f" · 점수 {score}" if score else ""))
     print(f"  → 수량 {r['shares']:,}주 · 포지션 {fmt(r['position_value'])} (계좌 {r['position_pct']:.1f}%) · "
@@ -212,8 +215,9 @@ def main() -> int:
 
     thesis = (note[:40] + ("…" if len(note) > 40 else "")) + (f" (점수 {score})" if score else "")
     cell = lambda v: f"{v:,.0f}" if market == "KR" else f"{v:,.2f}"  # noqa: E731 (table cell: KR=정수콤마, US=2소수)
+    status = "보유(페이퍼)" if args.paper else "보유"
     row = (f"| {args.date} | {args.ticker} | {args.action} | {cell(entry)} | {cell(stop)} | "
-           f"{r['shares']:,} | {r['position_pct']:.0f}% | {thesis} | 보유 | — |")
+           f"{r['shares']:,} | {r['position_pct']:.0f}% | {thesis} | {status} | — |")
     print(f"\n📌 포지션 행:\n{row}")
     if args.dry_run:
         print("   (dry-run — 쓰지 않음)")

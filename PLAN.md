@@ -13,6 +13,8 @@
 - **(2026-06-23 세션 결과·하루 10커밋 push):** ✅ 지표 6종 추가(ATR·Altman·F-score·accruals·GP·발행주식수) + 관리종목 게이트(라이브 144차단) + 헬스 dead-man-switch + 5년 실데이터 백테스트(`docs/backtest-findings`) + 정합성수정(drawdown −50·캐시키·**슬라이더 게이트 버그**) + news강등/catalyst끔/WATCHLIST정리(승인) + 메인 info패널 + 보조지표 중요도순 정렬 + 바탕화면 런처 갱신. **남은 핵심(다음 세션):** 유동성/거래대금 하한(데이터근거) → 생존편향 보정 백테스트 → 그 후 임계·가중치 데이터튜닝 / KR 위험공시(dart_risk_event)·수급(pykrx) / to_watchlist ATR 손절 자동초안. 인계: `handoff/2026-06-23-폭락주스크리너-최적화.md`.
 
 ## 다음 할 일
+- [x] **(2026-07-17) 추천 파이프라인 P0 빌드** — `docs/recommendation-design-2026-07-17.md` 설계+적대검증 후 구현 완료: recommend.py(레짐→하드게이트→체크리스트, E2E 검증: 통과 24·탈락 6 사유 기록) / DART 위험공시 진입 전 재점검 / 거래비용 라인 / decide --paper + track 페이퍼 코호트 분리 / 최대비중 15% / test_recommend.py+CI. **부수 버그 수정: track가 DECISIONS bare US 티커 못 읽던 잠복 결함.**
+- [ ] **(다음) 추천 파이프라인 운영 개시** — 주말 recommend.py → 체크리스트(베토 주 2건 상한) → 3~5픽 decide --paper(첫 8주 페이퍼/반액). 규칙 12주 고정(사전 등록). P1 백로그: 섹터 매핑·포트폴리오 집계·2차 트랜치 리마인더·EDGAR 링크.
 - [x] 아키텍처 결정 (수집/필터링 분리, 플러그인 필터, 뉴스 마지막)
 - [x] 필터 레지스트리 + 기본 하락 필터 / 기술지표 5종 / 뉴스 필터
 - [x] 엔진 + Streamlit 앱 + CLI(scan.py)

@@ -38,3 +38,8 @@ jobs:
         env:
           PYTHONUTF8: "1"
         run: python tests/test_app_selection.py
+
+      - name: Recommendation funnel + paper-tag tests
+        env:
+          PYTHONUTF8: "1"
+        run: python tests/test_recommend.py

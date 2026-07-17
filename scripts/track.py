@@ -104,20 +104,29 @@ def _records_from(path: Path, source: str) -> list[dict]:
             if _is_example(cells) or len(cells) <= max(ci_tkr, ci_px):
                 continue
             mt = _TICKER.search(cells[ci_tkr]) or re.search(r"\b(\d{6})\b", cells[ci_tkr])
-            if not mt:
-                continue
-            ticker = mt.group(1)
+            if mt:
+                ticker = mt.group(1)
+            else:
+                # DECISIONS positions carry a bare ticker cell ("NVO" — no
+                # parens); without this fallback US positions silently vanish
+                # from tracking/monitoring (latent until the first US buy).
+                bare = cells[ci_tkr].strip()
+                if not re.fullmatch(r"[A-Za-z][A-Za-z0-9.]{0,6}", bare):
+                    continue
+                ticker = bare.upper()
             ref = _num(cells[ci_px])
             if ref is None or ref <= 0:
                 continue
             sc = _SCORE.search(" ".join(cells))
+            status = cells[ci_status] if ci_status is not None and ci_status < len(cells) else ""
             out.append({
                 "ticker": ticker,
                 "market": "KR" if ticker.isdigit() and len(ticker) == 6 else "US",
                 "ref_price": ref,
                 "stop": _num(cells[ci_stop]) if ci_stop is not None and ci_stop < len(cells) else None,
                 "date": _parse_date(cells[ci_date]) if ci_date is not None and ci_date < len(cells) else None,
-                "status": cells[ci_status] if ci_status is not None and ci_status < len(cells) else "",
+                "status": status,
+                "paper": "페이퍼" in status,
                 "score": float(sc.group(1) or sc.group(2)) if sc else None,
                 "source": source,
             })
@@ -146,17 +155,19 @@ def _cohort_summary(valid: list[dict]) -> list[str]:
 
     cohorts: dict[object, list] = defaultdict(list)
     for r in valid:
-        cohorts[r["date"]].append(r)
+        # paper trades aggregate separately: the 8-week paper-first phase must
+        # never blend into the real-money cohort stats (recommendation-design §3)
+        cohorts[(r["date"], bool(r.get("paper")))].append(r)
     lines = []
-    for d in sorted(cohorts, key=lambda x: (x is None, x or date.min)):
-        cr = cohorts[d]
+    for d, paper in sorted(cohorts, key=lambda x: (x[0] is None, x[0] or date.min, x[1])):
+        cr = cohorts[(d, paper)]
         avg = sum(x["ret"] for x in cr) / len(cr)
         win = sum(1 for x in cr if x["ret"] > 0) / len(cr)
         days = next((x["days"] for x in cr if x["days"] is not None), None)
         scores = sorted({round(x["score"]) for x in cr if x["score"] is not None})
         stag = (f" · 점수 {scores[0]}~{scores[-1]}" if len(scores) > 1
                 else (f" · 점수 {scores[0]}" if scores else ""))
-        label = d.isoformat() if d else "날짜없음"
+        label = (d.isoformat() if d else "날짜없음") + (" [페이퍼]" if paper else "")
         dd = f"{days}d" if days is not None else "—"
         lines.append(f"{label} ({dd}, {len(cr)}종목{stag}): 평균 {avg:+.1f}%, 승률 {win:.0%}")
     return lines

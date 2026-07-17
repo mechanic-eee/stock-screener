@@ -12,8 +12,10 @@
 
 ## 닫힌 루프
 ```
-발굴(앱·알림) → 워치리스트 → decide.py(결정+사이징) → track.py(추적) → monitor.py(감시/청산)
+발굴(앱·알림) → recommend.py(주간 깔때기) → 워치리스트 → decide.py(결정+사이징) → track.py(추적) → monitor.py(감시/청산)
 ```
+주간 추천은 `recommend.py`가 랭킹 상위를 하드 게이트(펀더 결측·ATR·부도 이중확인·유동성·위험공시 재점검)로
+걸러 사람 체크리스트 후보를 뽑는다 — 설계·검증: `docs/recommendation-design-2026-07-17.md`.
 
 ## 스택
 - Python 3.x / 순수 pandas 지표(외부 TA 의존성 없음). 시세: FinanceDataReader(KR)·yfinance(US). 펀더: DART(KR)·yfinance/SEC EDGAR(US). 영속화: SQLite. UI: Streamlit. 알림: 텔레그램.
@@ -25,8 +27,9 @@ app.py                 Streamlit 대시보드 (4그룹 지표 토글·행클릭 
 scan.py                CLI 스캔
 scripts/
   daily_scan.py        일일 스캔·알림 (GitHub Actions)
+  recommend.py         주간 추천 깔때기 (레짐→하드게이트→체크리스트 후보, exports/)
   to_watchlist.py      후보 → 워치리스트 시드 (ATR 손절 자동초안)
-  decide.py            워치리스트행 → 사이징 → DECISIONS (매수/관망/청산)
+  decide.py            워치리스트행 → 사이징 → DECISIONS (매수/관망/청산, --paper 지원)
   position_size.py     ATR 손절 기반 리스크 사이징
   track.py             시드/포지션 사후 추적 (점수 실효성)
   monitor.py           보유종목 손절이탈·DART위험공시 감시

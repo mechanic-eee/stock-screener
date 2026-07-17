@@ -27,7 +27,10 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parents[1]
 PORTFOLIO = ROOT / "data" / "portfolio.json"
-DEFAULTS = {"account_krw": 10_000_000, "account_usd": 10_000, "risk_pct": 1.0, "max_pos_pct": 20.0}
+# max_pos_pct 20→15: the ATR stop cannot cap a gap-down (-100% tail), so the
+# position weight is the real single-name catastrophe ceiling; low-ATR names
+# otherwise reach 20%+ on R 1% alone (recommendation-design-2026-07-17 §1.5).
+DEFAULTS = {"account_krw": 10_000_000, "account_usd": 10_000, "risk_pct": 1.0, "max_pos_pct": 15.0}
 
 
 def _load_portfolio() -> dict:
