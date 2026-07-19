@@ -76,6 +76,91 @@ def _distress(market: str, ticker: str) -> list[str] | None:
     return flags
 
 
+ROOT = Path(__file__).resolve().parents[1]
+EDGAR_UA = "stock-screener-research yoobg1234@gmail.com"  # EDGAR 필수 식별 UA
+_EDGAR_SEEN_PATH = ROOT / "data" / "edgar_seen.json"      # 로컬 상태 (gitignore)
+_CIK_MAP_PATH = ROOT / "exports" / "edgar_cache" / "_cik_map.json"  # edgar_pit와 공유
+
+
+def _classify_filing(form: str) -> str | None:
+    """보유 중 US 공시의 위험 등급 — SMCI 교훈($7B 증자를 점수가 못 봄)의 커버.
+    🔴=희석·상폐·지연(424B/S-1/S-3/25/NT 10-*), 🟠=중요 이벤트(8-K, 내용 확인)."""
+    f = str(form).upper()
+    if f.startswith(("424B", "S-1", "S-3", "25", "NT 10")):
+        return "🔴"
+    if f.startswith("8-K"):
+        return "🟠"
+    return None
+
+
+def _filter_new_filings(forms, dates, accessions, seen: set,
+                        lookback_days: int = 30, today: dt.date | None = None):
+    """(순수 함수 — 테스트 대상) 신규 위험 공시 [(등급, form, date, accession)]."""
+    today = today or dt.date.today()
+    out = []
+    for form, dstr, acc in zip(forms, dates, accessions):
+        sev = _classify_filing(form)
+        if not sev or acc in seen:
+            continue
+        try:
+            fdate = dt.date.fromisoformat(str(dstr))
+        except ValueError:
+            continue
+        if (today - fdate).days > lookback_days:
+            continue
+        out.append((sev, str(form), fdate, acc))
+    return out
+
+
+def _edgar_filings(ticker: str):
+    """EDGAR submissions → (forms, dates, accessions) 최근 60건. None=조회 실패."""
+    import json
+    import urllib.request
+
+    try:
+        cik = None
+        if _CIK_MAP_PATH.exists():
+            cik = json.loads(_CIK_MAP_PATH.read_text(encoding="utf-8")).get(ticker.upper())
+        if cik is None:
+            req = urllib.request.Request("https://www.sec.gov/files/company_tickers.json",
+                                         headers={"User-Agent": EDGAR_UA})
+            raw = json.loads(urllib.request.urlopen(req, timeout=15).read())
+            m = {str(r["ticker"]).upper(): f"{int(r['cik_str']):010d}" for r in raw.values()}
+            _CIK_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _CIK_MAP_PATH.write_text(json.dumps(m), encoding="utf-8")
+            cik = m.get(ticker.upper())
+        if cik is None:
+            return None
+        req = urllib.request.Request(f"https://data.sec.gov/submissions/CIK{cik}.json",
+                                     headers={"User-Agent": EDGAR_UA})
+        sub = json.loads(urllib.request.urlopen(req, timeout=15).read())
+        rec = sub.get("filings", {}).get("recent", {})
+        n = 60
+        return (rec.get("form", [])[:n], rec.get("filingDate", [])[:n],
+                rec.get("accessionNumber", [])[:n])
+    except Exception:  # noqa: BLE001 — 3-상태: 실패는 None(미수행)
+        return None
+
+
+def _tracking_cohort_lines() -> list[str]:
+    """직전 track.py가 쓴 TRACKING.md의 코호트 불릿 — 주간 성적표 재료."""
+    try:
+        txt = (track.INVESTING / "TRACKING.md").read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        return []
+    out, grab = [], False
+    for ln in txt.splitlines():
+        if ln.startswith("**코호트별**"):
+            grab = True
+            continue
+        if grab:
+            if ln.startswith("- "):
+                out.append(ln[2:])
+            elif out:
+                break
+    return out
+
+
 def _upcoming_events(held_tickers: set[str]) -> list[tuple[dt.date, str]]:
     """(날짜, 라벨) — 보유 종목의 WATCHLIST 촉매 셀(M/D)과 DECISIONS 로그의
     2차 트랜치·리뷰 날짜를 파싱. 날짜 약속이 마크다운에만 적혀 있고 아무 코드도
@@ -162,6 +247,10 @@ def main() -> int:
     ap.add_argument("--no-distress", action="store_true", help="DART/펀더 위험 재점검 생략(빠름)")
     ap.add_argument("--no-rank-check", action="store_true",
                     help="스냅샷 랭킹 강등 체크 생략(스냅샷 다운로드·랭킹 ~1분 절약)")
+    ap.add_argument("--no-edgar", action="store_true",
+                    help="보유 US 종목 EDGAR 신규공시 감시 생략")
+    ap.add_argument("--weekly", action="store_true",
+                    help="주간 성적표를 오늘 강제 출력/전송 (기본: 월요일 자동)")
     args = ap.parse_args()
 
     held = _held_positions()
@@ -173,6 +262,14 @@ def main() -> int:
     print(f"보유 {len(held)}종목 감시 — 현재가/위험 재점검 중...", flush=True)
     events = _upcoming_events({it["ticker"] for it in held})
     ranks = None if args.no_rank_check else _rank_check(held)
+    edgar_seen: dict[str, list] = {}
+    if not args.no_edgar:
+        import json as _json
+        try:
+            if _EDGAR_SEEN_PATH.exists():
+                edgar_seen = _json.loads(_EDGAR_SEEN_PATH.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            edgar_seen = {}
     alerts: list[str] = []        # 종목별 치명/경고 한 줄
     lines: list[str] = []          # 콘솔 상태표
     vs_list: list[tuple[float, str]] = []   # (손절여유, 티커) — 하트비트용
@@ -198,6 +295,20 @@ def main() -> int:
             else:
                 for x in d:
                     flags.append(f"🔴 {x}")
+        if mkt == "US" and not args.no_edgar:
+            got = _edgar_filings(tkr)
+            if got is None:
+                soft.append("⚪ EDGAR 공시 감시 미수행(조회 실패)")
+            else:
+                forms, dates, accs = got
+                prev = set(edgar_seen.get(tkr, []))
+                if not prev:
+                    # 첫 실행은 기준선만 — 과거 공시 전체를 소급 알림하지 않는다
+                    soft.append("ℹ️ EDGAR 감시 기준선 설정(다음 실행부터 신규 공시 알림)")
+                else:
+                    for sev, form, fdate, _acc in _filter_new_filings(forms, dates, accs, prev):
+                        flags.append(f"{sev} EDGAR 신규 {form} ({fdate.strftime('%m/%d')}) — 내용 확인")
+                edgar_seen[tkr] = (list(prev) + [a for a in accs if a not in prev])[-80:]
         if not args.no_rank_check:
             if ranks is None:
                 soft.append("⚪ 랭킹 체크 미수행(스냅샷 로드 실패)")
@@ -248,23 +359,52 @@ def main() -> int:
                 print(f"  (텔레그램 전송 실패: {e})")
     else:
         print("\n✅ 보유종목 전부 정상 — 손절/위험공시 이상 없음.")
-        # 일일 하트비트: '알림 없음'과 '감시가 죽어 있음'을 폰에서 구분(감사 M1 —
-        # 아침의 1순위 질문 "내 보유 무사한가"가 어떤 표면에도 없던 갭). 알림이
-        # 있는 날은 그 알림이 곧 생존 신호라 하트비트를 따로 안 보낸다.
+
+    # 주간 성적표 (월요일 자동 / --weekly 강제): 코호트 vs 벤치마크(직전 track
+    # 산출 재사용)·다음 이벤트·보유 요약을 폰으로 — 성적표가 로컬 파일에만
+    # 존재하던 가시성 갭(감사 §2-3)의 해소. 신뢰는 매번 보는 표면에서 유지된다.
+    weekly = args.weekly or dt.date.today().weekday() == 0
+    if weekly:
+        rep = [f"📊 주간 성적표 ({dt.date.today().isoformat()})"]
+        rep += [f"· {ln}" for ln in _tracking_cohort_lines()[:6]]
+        if events:
+            rep.append("· 다음 이벤트: " + " / ".join(
+                f"{lbl} {ev.strftime('%m/%d')}" for ev, lbl in events[:3]))
+        rep.append(f"· 보유 {len(held)} · 오늘 알림 {len(alerts)}건 · "
+                   "(수익률은 비용·세금·환율 미반영)")
+        text = "\n".join(rep)
+        print("\n" + text)
         if args.telegram:
-            parts = [f"🩺 보유 {len(held)} 감시 정상 · 알림 0"]
-            if vs_list:
-                worst_vs, worst_t = min(vs_list)
-                parts.append(f"최소 손절여유 {worst_vs:+.0f}%({worst_t})")
-            if events:
-                ev, lbl = events[0]
-                parts.append(f"다음 이벤트 {lbl} {ev.strftime('%m/%d')}"
-                             f"(D-{(ev - dt.date.today()).days})")
             try:
                 from screener.notify.telegram import send_message
-                send_message(" · ".join(parts))
+                send_message(text)
             except Exception:  # noqa: BLE001
                 pass
+
+    # 일일 하트비트: '알림 없음'과 '감시가 죽어 있음'을 폰에서 구분(감사 M1).
+    # 알림이 있는 날은 알림이, 주간 성적표가 나간 날은 성적표가 곧 생존 신호.
+    if args.telegram and not alerts and not weekly:
+        parts = [f"🩺 보유 {len(held)} 감시 정상 · 알림 0"]
+        if vs_list:
+            worst_vs, worst_t = min(vs_list)
+            parts.append(f"최소 손절여유 {worst_vs:+.0f}%({worst_t})")
+        if events:
+            ev, lbl = events[0]
+            parts.append(f"다음 이벤트 {lbl} {ev.strftime('%m/%d')}"
+                         f"(D-{(ev - dt.date.today()).days})")
+        try:
+            from screener.notify.telegram import send_message
+            send_message(" · ".join(parts))
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not args.no_edgar:
+        import json as _json
+        try:
+            _EDGAR_SEEN_PATH.parent.mkdir(exist_ok=True)
+            _EDGAR_SEEN_PATH.write_text(_json.dumps(edgar_seen), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
     return 0
 
 

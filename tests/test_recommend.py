@@ -170,6 +170,53 @@ def test_upcoming_events() -> None:
     print("  events: held-only catalyst + tranche/review parse OK")
 
 
+def test_edgar_filter() -> None:
+    """EDGAR watch: severity map, seen-skip, lookback window (pure function)."""
+    from datetime import date
+
+    import monitor
+
+    assert monitor._classify_filing("424B5") == "🔴"
+    assert monitor._classify_filing("S-1/A") == "🔴"
+    assert monitor._classify_filing("NT 10-Q") == "🔴"
+    assert monitor._classify_filing("8-K") == "🟠"
+    assert monitor._classify_filing("10-Q") is None
+    assert monitor._classify_filing("4") is None
+
+    forms = ["8-K", "424B5", "10-Q", "8-K", "S-1"]
+    dates = ["2026-07-18", "2026-07-15", "2026-07-14", "2026-05-01", "2026-07-10"]
+    accs = ["a1", "a2", "a3", "a4", "a5"]
+    got = monitor._filter_new_filings(forms, dates, accs, seen={"a5"},
+                                      today=date(2026, 7, 19))
+    got_accs = [g[3] for g in got]
+    assert got_accs == ["a1", "a2"], got       # 10-Q ignored, a4 out of window, a5 seen
+    assert got[1][0] == "🔴" and got[0][0] == "🟠", got
+    print("  edgar: severity + seen + lookback OK")
+
+
+def test_weekly_cohort_lines() -> None:
+    """Weekly report pulls cohort bullets from TRACKING.md."""
+    import monitor
+    import track
+
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "TRACKING.md").write_text("\n".join([
+        "# TRACKING", "",
+        "**코호트별** (시드일 기준):",
+        "- 2026-06-25 (24d, 10종목): 평균 +2.9%, 승률 60% (vs KOSPI -23.6%)",
+        "- 2026-07-18 [페이퍼] (1d, 5종목): 평균 +0.3%, 승률 60%",
+        "", "| 표 |",
+    ]), encoding="utf-8")
+    old = track.INVESTING
+    track.INVESTING = tmp
+    try:
+        lines = monitor._tracking_cohort_lines()
+    finally:
+        track.INVESTING = old
+    assert len(lines) == 2 and "[페이퍼]" in lines[1], lines
+    print("  weekly: TRACKING cohort bullets parse OK")
+
+
 def test_biz_days_behind() -> None:
     from datetime import date
 
@@ -187,6 +234,8 @@ def main() -> int:
     test_paper_cohorts()
     test_tranche_merge()
     test_upcoming_events()
+    test_edgar_filter()
+    test_weekly_cohort_lines()
     test_score_regex_formats()
     test_biz_days_behind()
     print("✅ test_recommend: all passed")
