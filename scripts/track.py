@@ -238,32 +238,45 @@ def _cohort_summary(valid: list[dict], with_bench: bool = False) -> list[str]:
     return lines
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dry-run", action="store_true", help="콘솔만, TRACKING.md 안 씀")
-    args = ap.parse_args()
+def _collect(watchlist: Path, decisions: Path) -> list[dict]:
+    """WATCHLIST 시드 + DECISIONS 결정을 추적 레코드로 수집.
 
-    # DECISIONS positions take priority over watchlist seeds for the same ticker.
-    # Within DECISIONS, held tranche rows of one ticker merge into a single
-    # position (weighted-average entry); closed rows stay separate episodes,
-    # keyed (ticker, date, status) so nothing silently overwrites anything.
+    DECISIONS positions take priority over watchlist seeds for the same ticker
+    — but only within the same cycle (seed date == a decision date). An
+    older-cohort seed row must survive a later real decision, or buying a
+    cohort member silently shrinks its seed cohort (NVO 2026-07-20: 6/25
+    cohort went 10→9). Within DECISIONS, held tranche rows of one ticker
+    merge into a single position (weighted-average entry); closed rows stay
+    separate episodes, keyed (ticker, date, status) so nothing silently
+    overwrites anything."""
     from collections import defaultdict
 
     recs: dict[object, dict] = {}
-    for r in _records_from(WATCHLIST, "watchlist"):
+    for r in _records_from(watchlist, "watchlist"):
         recs.setdefault(r["ticker"], r)
     by_ticker: dict[str, list[dict]] = defaultdict(list)
-    for r in _records_from(DECISIONS, "decision"):
+    for r in _records_from(decisions, "decision"):
         by_ticker[r["ticker"]].append(r)
     for tkr, drows in by_ticker.items():
-        recs.pop(tkr, None)  # a decision replaces the watchlist seed row
+        ddates = {r.get("date") for r in drows}
+        wl = recs.get(tkr)
+        if wl is not None and wl.get("date") in ddates:
+            recs.pop(tkr, None)  # same-cycle seed row — decision supersedes it
         held = [r for r in drows if "보유" in (r.get("status") or "")]
         if held:
             recs[(tkr, "position")] = _merge_tranches(held)
         for r in drows:
             if r not in held:
                 recs[(tkr, r.get("date"), r.get("status"))] = r
-    items = list(recs.values())
+    return list(recs.values())
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dry-run", action="store_true", help="콘솔만, TRACKING.md 안 씀")
+    args = ap.parse_args()
+
+    items = _collect(WATCHLIST, DECISIONS)
     if not items:
         print("추적할 항목이 없습니다 (WATCHLIST/DECISIONS에 티커+가격 행 필요).")
         return 0

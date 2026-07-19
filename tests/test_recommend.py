@@ -123,6 +123,42 @@ def test_tranche_merge() -> None:
     print("  tranche merge: weighted avg + latest stop + first date OK")
 
 
+def test_seed_cohort_survives_decision() -> None:
+    """실계좌 결정이 '다른 코호트'의 워치리스트 시드 행을 지우면 안 된다.
+
+    NVO 2026-07-20 실매수가 6/25 시드 코호트를 10→9로 줄였던 회귀
+    (같은 사이클 시드(시드일==결정일)만 결정이 대체 — 페이퍼 픽 이중집계 방지는 유지)."""
+    import track
+
+    tmp = Path(tempfile.mkdtemp())
+    wl = tmp / "WATCHLIST.md"
+    dc = tmp / "DECISIONS.md"
+    wl.write_text("\n".join([
+        "| 종목 (티커) | 논거 | 진입 | 손절선 | 촉매 | 상태 | 갱신일 |",
+        "|---|---|---|---|---|---|---|",
+        "| Novo (NVO) | 스크리너 93점 시드 | 현재가 $45.88 부근 | $42.13 | 실적 | 보유 | 2026-06-25 |",
+        "| Amplus (259630) | 스크리너 85점 | 9,720원 | 7,923원 | 실적 | 보유(페이퍼) | 2026-07-18 |",
+    ]), encoding="utf-8")
+    dc.write_text("\n".join([
+        "## 📌 포지션",
+        "| 날짜 | 티커 | 액션 | 진입가 | 손절 | 수량 | 비중 | 논거 | 상태 | 청산 |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+        "| 2026-07-20 | NVO | 매수 | 50.32 | 47.06 | 29 | 15% | 실계좌 (점수 93) | 보유 | — |",
+        "| 2026-07-18 | 259630 | 매수 | 9720 | 7923 | 55 | 5% | 페이퍼 (점수 85) | 보유(페이퍼) | — |",
+    ]), encoding="utf-8")
+
+    items = track._collect(wl, dc)
+    nvo = [r for r in items if r["ticker"] == "NVO"]
+    amp = [r for r in items if r["ticker"] == "259630"]
+    # NVO: 6/25 시드(watchlist)와 7/20 실포지션(decision) 둘 다 살아야 한다
+    assert len(nvo) == 2 and {r["source"] for r in nvo} == {"watchlist", "decision"}, nvo
+    seed = next(r for r in nvo if r["source"] == "watchlist")
+    assert seed["date"].isoformat() == "2026-06-25" and seed["ref_price"] == 45.88, seed
+    # 같은 사이클(시드일==결정일) 페이퍼 픽은 여전히 결정 행 하나로 대체(이중집계 방지)
+    assert len(amp) == 1 and amp[0]["source"] == "decision", amp
+    print("  seed-cohort: older seed survives real decision, same-cycle dedup kept OK")
+
+
 def test_score_regex_formats() -> None:
     import track
 
@@ -234,6 +270,7 @@ def main() -> int:
     test_paper_cohorts()
     test_tranche_merge()
     test_upcoming_events()
+    test_seed_cohort_survives_decision()
     test_edgar_filter()
     test_weekly_cohort_lines()
     test_score_regex_formats()
