@@ -174,15 +174,18 @@ def _regime(markets: list[str]) -> dict[str, dict]:
 
     out: dict[str, dict] = {}
     for mk in markets:
-        above = asof = None
+        above = asof = dist = None
         try:
             s = benchmark.get_benchmark(mk)
             if s is not None and len(s) >= 200:
-                above = float(s.iloc[-1]) >= float(s.tail(200).mean())
+                ma = float(s.tail(200).mean())
+                last = float(s.iloc[-1])
+                above = last >= ma
+                dist = (last / ma - 1) * 100  # 200일선까지 거리 — 이탈 임박 가시화
                 asof = s.index.max().date()
         except Exception:  # noqa: BLE001
             pass
-        out[mk] = {"above": above, "asof": asof}
+        out[mk] = {"above": above, "asof": asof, "dist": dist}
     return out
 
 
@@ -286,8 +289,9 @@ def _checklist_md(finalists: list[dict], dropped_all: list[tuple[dict, str]],
         above = r.get("above")
         tag = ("판정불가 → 신규보류(fail-closed)" if above is None
                else ("200일선↑ 진입가능" if above else "200일선↓ 신규차단(페이퍼만)"))
+        d = f" {r['dist']:+.1f}%" if r.get("dist") is not None else ""
         asof_b = f"(기준 {r['asof']})" if r.get("asof") else ""
-        reg_parts.append(f"{mk} {tag}{asof_b}")
+        reg_parts.append(f"{mk} {tag}{d}{asof_b}")
     out += [f"**레짐:** {' · '.join(reg_parts)}", ""]
     out += [f"**비용 리마인더:** 왕복 KR {COST_NOTE['KR'][0]}({COST_NOTE['KR'][1]}) · "
             f"US {COST_NOTE['US'][0]}({COST_NOTE['US'][1]}) — 검증 엣지 +1.3~3.8%p/픽의 "
@@ -442,7 +446,8 @@ def main() -> int:
         r = regime[mk]
         tag = ("판정불가 → 신규보류(fail-closed)" if r["above"] is None
                else ("200일선↑" if r["above"] else "200일선↓ 신규차단"))
-        return f"{mk} {tag}" + (f"(기준 {r['asof']})" if r["asof"] else "")
+        d = f" {r['dist']:+.1f}%" if r.get("dist") is not None else ""
+        return f"{mk} {tag}{d}" + (f"(기준 {r['asof']})" if r["asof"] else "")
 
     reg_txt = " · ".join(_reg_label(mk) for mk in regime)
     acct_line = (f"계좌 가정: KR ₩{cfg['account_krw']:,.0f} · US ${cfg['account_usd']:,.0f} · "

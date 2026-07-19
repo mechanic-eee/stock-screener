@@ -268,8 +268,14 @@ def main() -> int:
         for mk in args.markets:
             s = _bench.get_benchmark(mk)
             if s is not None and len(s) >= 200:
-                above = float(s.iloc[-1]) >= float(s.tail(200).mean())
-                reg.append(f"{mk} {'200일선↑(배치양호)' if above else '200일선↓(주의)'}")
+                ma = float(s.tail(200).mean())
+                last = float(s.iloc[-1])
+                # distance-to-flip: the regime gate is the ONE validated timing
+                # lever (timing-signals.md), so show how close it is to flipping
+                # — a crash (2026-07 KOSPI) can cross it between alerts.
+                dist = (last / ma - 1) * 100
+                tag = "200일선↑(배치양호)" if last >= ma else "200일선↓(주의)"
+                reg.append(f"{mk} {tag} {dist:+.1f}%")
         if reg:
             lines.append("시장: " + " · ".join(reg))
     except Exception:  # noqa: BLE001 — regime line is a bonus, never break the alert
