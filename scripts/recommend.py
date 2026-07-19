@@ -53,10 +53,24 @@ ALERT_SET = ["fundamental", "valuation", "altman_z", "piotroski",
 FUND4 = ("fundamental", "altman_z", "piotroski", "gross_profit")
 
 # 왕복 거래비용 가정치 [재량 — 정보 표시용]: KR 매도 거래세 ~0.15% + 슬리피지
-# 편도 ~0.15%×2, US는 세금 무시(SEC fee 미미) + 슬리피지 왕복. 검증 엣지(픽당
-# +1.3~3.8%p)의 12~35%를 비용이 먹는다는 걸 매 실행마다 눈앞에 둔다(적대검증 §C1).
+# 편도 ~0.15%×2, US는 SEC fee 미미하나 **한국 거주자 해외주식 양도세 22%**(연
+# 250만 공제 초과 이익)가 별도로 있다 — "세금 무시"로 쓰면 엣지(+1.3~3.8%p)의
+# ~22%를 숨기는 오도가 된다(감사 2026-07-19 [중-8]).
 COST_NOTE = {"KR": ("≈0.45%", "거래세 0.15% + 슬리피지 0.15%×2"),
-             "US": ("≈0.30%", "슬리피지 0.15%×2")}
+             "US": ("≈0.30% + 양도세", "슬리피지 0.15%×2 · 이익의 22% 양도세(연 250만 공제) 별도")}
+
+
+def _biz_days_behind(last, today) -> int:
+    """last(date) 이후 today까지의 주중 일수 — 시세 신선도 판정용(휴일 미고려라
+    1일 지연은 휴장일 수 있음; 2일 초과는 확실한 이상)."""
+    from datetime import timedelta
+
+    n, cur = 0, last
+    while cur < today:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            n += 1
+    return n
 
 
 # --------------------------------------------------------------------------- #
@@ -164,11 +178,12 @@ def _regime(markets: list[str]) -> dict[str, bool | None]:
     return out
 
 
-def _fresh_distress(market: str, ticker: str) -> list[str]:
+def _fresh_distress(market: str, ticker: str) -> list[str] | None:
     """진입 전 위험공시·펀더 치명신호 라이브 재점검 — monitor._distress 재사용.
 
     사이드카는 최대 하루 낡았을 수 있다: monitor가 보유종목에 하던 체크를
-    진입 전으로 당긴다(설계 §1 게이트 5). best-effort — 실패하면 빈 리스트.
+    진입 전으로 당긴다(설계 §1 게이트 5). 3-상태: 사유 리스트/빈 리스트(깨끗)/
+    **None(미수행)** — 호출자는 None을 '통과'로 취급하면 안 된다.
     """
     import monitor
 
@@ -185,12 +200,19 @@ def _fmt(market: str, v) -> str:
 
 
 def _checklist_md(finalists: list[dict], dropped_all: list[tuple[dict, str]],
-                  regime: dict, risk_pct: float, today: str) -> str:
+                  regime: dict, risk_pct: float, today: str,
+                  asof_line: str = "", acct_line: str = "",
+                  priority_n: int = 5) -> str:
     out = [f"# 추천 깔때기 체크리스트 — {today}",
            "",
            "> `scripts/recommend.py` 산출. **매수 리스트가 아니다** — 아래 후보를 사람",
            "> 체크(negative screen, 종목당 15분, 베토 주 2건 상한)에 올려 3~5픽으로 좁힌다.",
+           f"> **⭐ 우선 리서치(시장별 {priority_n})부터** — 나머지는 여유 있을 때만.",
            "> 규칙·숫자는 12주 고정 (docs/recommendation-design-2026-07-17.md).", ""]
+    if asof_line:
+        out += [f"**{asof_line}**", ""]
+    if acct_line:
+        out += [f"**{acct_line}**", ""]
     reg_parts = []
     for mk, above in regime.items():
         tag = "판정불가" if above is None else ("200일선↑ 진입가능" if above else "200일선↓ 신규차단(페이퍼만)")
@@ -202,7 +224,9 @@ def _checklist_md(finalists: list[dict], dropped_all: list[tuple[dict, str]],
     for r in finalists:
         mk, t = r["market"], r["ticker"]
         paper_only = regime.get(mk) is False
-        head = (f"## {t} — {r.get('name', '')} ({mk}) · 점수 {r.get('점수')} · "
+        star = "⭐ " if r.get("_priority") else ""
+        rank = (f" · {mk} {r['_rank']}/{r['_rank_n']}위" if r.get("_rank") else "")
+        head = (f"## {star}{t} — {r.get('name', '')} ({mk}) · 점수 {r.get('점수')}{rank} · "
                 f"낙폭 {r.get('하락률', 0):.0f}% · ATR {r.get('atr_pct', 0):.1f}%")
         if paper_only:
             head += " · ⚠️ 레짐↓ 페이퍼 전용"
@@ -212,7 +236,10 @@ def _checklist_md(finalists: list[dict], dropped_all: list[tuple[dict, str]],
         size_txt = (f"{r.get('shares', 0):,}주 · 포지션 {_fmt(mk, r.get('pos_value'))} "
                     f"({r.get('pos_pct', 0):.1f}%, R {risk_pct:.1f}%)"
                     if r.get("shares") else "산출 불가")
-        out += [f"- 진입초안 {_fmt(mk, r.get('close'))} · 손절초안 {stop_txt} · 수량초안 {size_txt}",
+        distress = r.get("_distress", "통과")
+        out += [f"- 위험공시 라이브 재점검: {distress}"
+                + (" ⚠️" if distress != "통과" else ""),
+                f"- 진입초안 {_fmt(mk, r.get('close'))} · 손절초안 {stop_txt} · 수량초안 {size_txt}",
                 "- [ ] 낙폭 사유 한 문장 (구조적 소멸형=핵심사업 상실·규제 퇴출·존속위협 소송이면 탈락): ",
                 "- [ ] 진행 중 대규모 증자·CB 없음 (KR DART / US EDGAR S-1·424B)",
                 "- [ ] 현금+영업CF 18개월 생존 (점수 분해 + 최근 분기보고서)",
@@ -242,6 +269,11 @@ def main() -> int:
     ap.add_argument("--top", type=int, default=15, help="시장별 랭킹 컷 (기본 15)")
     ap.add_argument("--types", nargs="+", default=["common", "preferred"],
                     help="포함 종목유형 (기본: 일일 알림과 동일 — CEF/ETF 혼입 방지)")
+    ap.add_argument("--priority", type=int, default=5,
+                    help="시장별 '⭐ 우선 리서치' 마킹 수 (기본 5 — 설계의 체크리스트 "
+                         "부하 8~12종 정합용 표시. 게이트·랭크컷은 불변)")
+    ap.add_argument("--allow-stale", action="store_true",
+                    help="시세 기준일이 2영업일 초과 낡아도 진행 (기본: 중단)")
     ap.add_argument("--atr-max", type=float, default=8.0, help="[재량] ATR%% 상한 (기본 8)")
     ap.add_argument("--turnover-cap", type=float, default=3.0,
                     help="[재량] 포지션 ≤ 20일 평균 거래대금의 %% (기본 3)")
@@ -260,6 +292,19 @@ def main() -> int:
     rows, px = _load_rows(args.snapshot, args.min_drop, args.years)
     regime = _regime(args.markets)
 
+    # 시세 기준일(as-of) — 진입·손절·수량 초안 전부가 이 날짜의 종가다. 무표기가
+    # 7/16 낡은 스냅샷 사고를 사람이 못 알아채게 만든 직접 원인(감사 [상-1]).
+    asof = None
+    dates = [df.index.max() for df in px.values() if df is not None and not df.empty]
+    if dates:
+        asof = max(dates).date()
+    behind = _biz_days_behind(asof, date.today()) if asof else None
+    if behind is not None and behind > 2 and not args.allow_stale:
+        print(f"❌ 시세 기준일 {asof} — {behind}영업일 낡음. 스냅샷/스캔 상태를 확인하세요 "
+              "(강행: --allow-stale). 낡은 가격으로 진입·손절 초안을 내지 않습니다.")
+        return 1
+    stale_note = (f" ⚠️ {behind}영업일 낡음 — 휴장 또는 스캔 지연 확인" if behind else "")
+
     finalists: list[dict] = []
     dropped_all: list[tuple[dict, str]] = []
     types = set(args.types)
@@ -268,19 +313,33 @@ def main() -> int:
         # 동일 패턴으로, ETF/펀드가 상위 15 슬롯을 차지하는 것을 막는다
         mrows = [r for r in rows if r.get("market") == mk
                  and r.get("_security_type", "common") in types][: args.top]
+        for i, r in enumerate(mrows):
+            # 검증된 객체는 절대 점수가 아니라 시장 내 상대 랭크 — 표면에 병기
+            r["_rank"] = i + 1
+            r["_rank_n"] = len(mrows)
         _attach_drafts(mrows, px, args.stop_atr_mult, cfg, args.risk)
         kept, dropped = apply_gates(mrows, atr_max=args.atr_max,
                                     turnover_cap_pct=args.turnover_cap)
-        # 게이트 6: 진입 전 위험공시·치명신호 라이브 재점검 (best-effort)
-        if not args.no_fresh_distress:
+        # 게이트 6: 진입 전 위험공시·치명신호 라이브 재점검. 3-상태 — 미수행(None)
+        # 은 통과와 다르다: "검사 안 됨"이 "깨끗함"으로 둔갑하지 않게 표기한다.
+        if args.no_fresh_distress:
+            for r in kept:
+                r["_distress"] = "생략(--no-fresh-distress)"
+        else:
             still = []
             for r in kept:
                 flags = _fresh_distress(mk, r["ticker"])
-                if flags:
+                if flags is None:
+                    r["_distress"] = "미수행(조회 실패 — 수동 확인 필요)"
+                    still.append(r)
+                elif flags:
                     dropped.append((r, "위험공시 재점검: " + " | ".join(flags)))
                 else:
+                    r["_distress"] = "통과"
                     still.append(r)
             kept = still
+        for i, r in enumerate(kept):
+            r["_priority"] = i < args.priority
         finalists += kept
         dropped_all += dropped
 
@@ -288,19 +347,34 @@ def main() -> int:
     reg_txt = " · ".join(
         f"{mk} {'판정불가' if a is None else ('200일선↑' if a else '200일선↓ 신규차단')}"
         for mk, a in regime.items())
-    print(f"\n레짐: {reg_txt}")
+    acct_line = (f"계좌 가정: KR ₩{cfg['account_krw']:,.0f} · US ${cfg['account_usd']:,.0f} · "
+                 f"R {args.risk:.1f}% ({cfg.get('_source', 'data/portfolio.json')}) — "
+                 "실계좌와 다르면 수량·비중은 예시일 뿐")
+    print(f"\n시세 기준일: {asof} 종가{stale_note} — 진입·손절·수량 초안의 기준, "
+          "주문 전 현재가로 재계산" if asof else "\n⚠️ 시세 기준일 산출 불가")
+    print(acct_line)
+    print(f"레짐: {reg_txt}")
     print(f"비용: 왕복 KR {COST_NOTE['KR'][0]} · US {COST_NOTE['US'][0]} "
           f"(vs 엣지 +1.3~3.8%p/픽 — 잠식 주의)")
-    if not any(regime.values()):
+    reg_known = [v for v in regime.values() if v is not None]
+    if reg_known and not any(reg_known):
         print("⚠️ 전 시장 200일선 아래 — 이번 주 신규 진입 없음, 아래 후보는 페이퍼 전용.")
+    elif not reg_known:
+        print("⚠️ 레짐 판정불가(벤치마크 데이터 없음) — 200일선 위 확인 전 신규 진입 보류 권장.")
 
-    print(f"\n게이트 통과 {len(finalists)}종목 (상위 {args.top}/시장 → 사람 체크 후보):")
+    n_unchecked = sum(1 for r in finalists if r.get("_distress", "통과") != "통과")
+    print(f"\n게이트 통과 {len(finalists)}종목 (상위 {args.top}/시장 → 사람 체크 후보, "
+          f"⭐=우선 리서치 시장별 {args.priority})"
+          + (f" · ⚪ 위험공시 재점검 미수행 {n_unchecked}건" if n_unchecked else "") + ":")
     if finalists:
-        print(f"{'티커':<8}{'시장':<4}{'점수':>6}{'낙폭':>6}{'ATR%':>6}"
+        print(f"{'':<2}{'랭크':<6}{'티커':<8}{'시장':<4}{'점수':>6}{'낙폭':>6}{'ATR%':>6}"
               f"{'진입초안':>12}{'손절초안':>12}{'수량':>8}{'비중':>6}")
         for r in finalists:
             mk = r["market"]
-            print(f"{r['ticker']:<8}{mk:<4}{r.get('점수', 0):>6.1f}{r.get('하락률', 0):>5.0f}%"
+            star = "⭐" if r.get("_priority") else "  "
+            rank = f"{r.get('_rank', '?')}/{r.get('_rank_n', '?')}"
+            print(f"{star:<2}{rank:<6}{r['ticker']:<8}{mk:<4}{r.get('점수', 0):>6.1f}"
+                  f"{r.get('하락률', 0):>5.0f}%"
                   f"{r.get('atr_pct', 0):>6.1f}{_fmt(mk, r.get('close')):>12}"
                   f"{_fmt(mk, r.get('stop')):>12}{r.get('shares', 0):>8,}"
                   f"{r.get('pos_pct', 0):>5.1f}%")
@@ -311,8 +385,12 @@ def main() -> int:
     if not args.no_write:
         EXPORTS.mkdir(exist_ok=True)
         out_path = EXPORTS / f"recommend-{today}.md"
+        asof_line = (f"시세 기준일: {asof} 종가{stale_note} — 진입·손절·수량 초안의 기준. "
+                     "주문 전 현재가로 재계산" if asof else "⚠️ 시세 기준일 산출 불가")
         out_path.write_text(_checklist_md(finalists, dropped_all, regime,
-                                          args.risk, today), encoding="utf-8")
+                                          args.risk, today,
+                                          asof_line=asof_line, acct_line=acct_line,
+                                          priority_n=args.priority), encoding="utf-8")
         print(f"\n✅ 체크리스트 저장: {out_path}")
         print("다음: 체크리스트(종목당 15분, 베토 주 2건 상한) → 3~5픽 → "
               "decide.py --paper (첫 8주) → 당일 1차 트랜치")

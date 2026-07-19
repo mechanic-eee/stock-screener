@@ -81,17 +81,48 @@ def test_paper_cohorts() -> None:
     recs = track._records_from(p, "decision")
     by = {r["ticker"]: r for r in recs}
     assert by["NVO"]["paper"] is True and by["PGNY"]["paper"] is False, by
+    # decide.py writes "(점수 93)" — the old _SCORE regex silently dropped it
+    # (2026-07-19 audit: score-efficacy loop broken for every real position)
+    assert by["NVO"]["score"] == 93.0 and by["PGNY"]["score"] == 90.0, by
 
     valid = [{**r, "ret": 5.0, "days": 1} for r in recs]
     lines = track._cohort_summary(valid)
     assert len(lines) == 2, lines                       # same date, split by paper
     assert sum("[페이퍼]" in ln for ln in lines) == 1, lines
-    print("  paper: record flag + cohort split OK")
+    print("  paper: record flag + cohort split + decide-format score OK")
+
+
+def test_score_regex_formats() -> None:
+    import track
+
+    cases = {"5년고가 대비 66% 낙폭, 스크리너 93점, ATR": 93.0,
+             "EV캐즘 사이클 낙폭 (1차 트랜치) (점수 84.7)": 84.7,
+             "레거시 표기 100점": 100.0}
+    for text, want in cases.items():
+        m = track._SCORE.search(text)
+        assert m, text
+        got = float(m.group(1) or m.group(2) or m.group(3))
+        assert got == want, (text, got)
+    print("  score regex: 3 formats OK")
+
+
+def test_biz_days_behind() -> None:
+    from datetime import date
+
+    from recommend import _biz_days_behind
+
+    assert _biz_days_behind(date(2026, 7, 17), date(2026, 7, 18)) == 0   # Fri data, Sat run
+    assert _biz_days_behind(date(2026, 7, 17), date(2026, 7, 20)) == 1   # Fri data, Mon run
+    assert _biz_days_behind(date(2026, 7, 15), date(2026, 7, 17)) == 2   # the 7/16 incident shape
+    assert _biz_days_behind(date(2026, 7, 17), date(2026, 7, 17)) == 0
+    print("  biz-days-behind: boundary cases OK")
 
 
 def main() -> int:
     test_gates()
     test_paper_cohorts()
+    test_score_regex_formats()
+    test_biz_days_behind()
     print("✅ test_recommend: all passed")
     return 0
 

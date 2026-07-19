@@ -34,12 +34,19 @@ DEFAULTS = {"account_krw": 10_000_000, "account_usd": 10_000, "risk_pct": 1.0, "
 
 
 def _load_portfolio() -> dict:
+    """계좌 설정 + `_source`(어느 전제로 계산됐는지). 파싱 실패는 더 이상 무음이
+    아니다 — 기본값 1천만원/$1만으로 산출된 수량·비중이 '계산된 값'처럼 보이는
+    것이 감사(2026-07-19 [상-5])가 잡은 오도 경로다."""
     cfg = dict(DEFAULTS)
+    cfg["_source"] = "내장 기본값 — data/portfolio.json 없음"
     try:
         if PORTFOLIO.exists():
             cfg.update(json.loads(PORTFOLIO.read_text(encoding="utf-8")))
-    except Exception:  # noqa: BLE001
-        pass
+            cfg["_source"] = "data/portfolio.json"
+    except Exception as e:  # noqa: BLE001
+        cfg["_source"] = f"내장 기본값 — portfolio.json 파싱 실패({e.__class__.__name__})"
+        print(f"⚠️ data/portfolio.json 파싱 실패 → 내장 기본값으로 계산합니다 "
+              f"({e.__class__.__name__})", file=sys.stderr)
     return cfg
 
 

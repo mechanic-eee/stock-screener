@@ -39,15 +39,21 @@ def _held_positions() -> list[dict]:
     return [r for r in recs if "보유" in (r.get("status") or "")]
 
 
-def _distress(market: str, ticker: str) -> list[str]:
-    """보유 종목의 현재 치명 신호 재점검(DART/yfinance). 사유 리스트(없으면 빈)."""
+def _distress(market: str, ticker: str) -> list[str] | None:
+    """보유 종목의 현재 치명 신호 재점검(DART/yfinance).
+
+    반환 3-상태: 사유 리스트(치명 있음) / 빈 리스트(점검 수행·깨끗) /
+    **None(점검 미수행 — 조회 실패·데이터 없음)**. 예전엔 미수행도 빈 리스트라
+    "검사 안 됨"이 "깨끗함"으로 둔갑했다(서비스 감사 2026-07-19 [상-3]) —
+    호출자는 None을 반드시 '미수행'으로 표기해야 한다.
+    """
     try:
         from screener import fundamentals as fund
         fb = fund.get_fundamentals(market, ticker, use_cache=False)
     except Exception:  # noqa: BLE001 — distress check is best-effort
-        return []
+        return None
     if fb is None or not getattr(fb, "available", False):
-        return []
+        return None
     flags = []
     if getattr(fb, "capital_impairment", False):
         flags.append("자본잠식")
@@ -82,18 +88,28 @@ def main() -> int:
         ret = ((cur - it["ref_price"]) / it["ref_price"] * 100.0) if cur else None
         stop = it.get("stop")
         flags: list[str] = []
+        soft: list[str] = []  # 상태표엔 보이되 텔레그램 알림은 안 타는 경고
+        if cur is None:
+            # fail-closed: 이 유니버스의 파국(거래정지→상폐)은 정확히 가격 피드가
+            # 죽는 사건이다 — 예전엔 이때 "가격없음 ✅"로 침묵했다(감사 [상-2]).
+            flags.append("🔴 가격조회 실패 — 손절 감시 불능(거래정지·상폐·데이터 장애 확인)")
         if cur is not None and stop and cur <= stop:
             flags.append(f"🔴 손절이탈(현재 {track._fmt(mkt, cur)} ≤ 손절 {track._fmt(mkt, stop)})")
         if ret is not None and ret <= -abs(args.loss_alert):
             flags.append(f"🟠 손실 {ret:+.0f}%")
         if not args.no_distress:
-            for d in _distress(mkt, tkr):
-                flags.append(f"🔴 {d}")
+            d = _distress(mkt, tkr)
+            if d is None:
+                soft.append("⚪ 위험 재점검 미수행(펀더 조회 실패 — 수동 확인)")
+            else:
+                for x in d:
+                    flags.append(f"🔴 {x}")
         vs_stop = ((cur - stop) / cur * 100.0) if (cur and stop) else None
         status = (f"{track._fmt(mkt, cur)} · {ret:+.1f}%" if ret is not None else "가격없음")
         vs = f" · 손절여유 {vs_stop:+.0f}%" if vs_stop is not None else ""
+        shown = flags + soft
         lines.append(f"  {tkr:<8}{mkt:<4} {status}{vs}"
-                     + (f"  → {' | '.join(flags)}" if flags else "  ✅"))
+                     + (f"  → {' | '.join(shown)}" if shown else "  ✅"))
         if flags:
             alerts.append(f"[{mkt}] {tkr} {ret:+.0f}% — {' | '.join(flags)}" if ret is not None
                           else f"[{mkt}] {tkr} — {' | '.join(flags)}")

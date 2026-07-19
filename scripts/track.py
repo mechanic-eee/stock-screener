@@ -31,7 +31,10 @@ DECISIONS = INVESTING / "DECISIONS.md"
 _TICKER = re.compile(r"\(([A-Za-z0-9.]{1,7})\)")
 _NUM = re.compile(r"-?\d[\d,]*\.?\d*")
 _DATE = re.compile(r"(20\d\d)[-.](\d\d)[-.](\d\d)")
-_SCORE = re.compile(r"스크리너\s*([\d.]+)\s*점|(\d+)\s*점")
+# 세 형식 전부: "스크리너 93점"(워치리스트) · "(점수 85)"(decide.py 포지션 행) ·
+# "100점". decide 형식 누락으로 실포지션 5행의 점수가 전부 "—"로 소실됐었다
+# (감사 2026-07-19 [상-4] — 점수 실효성 루프 단절).
+_SCORE = re.compile(r"스크리너\s*([\d.]+)\s*점|점수\s*([\d.]+)|(\d+)\s*점")
 
 
 def _num(cell: str):
@@ -127,7 +130,7 @@ def _records_from(path: Path, source: str) -> list[dict]:
                 "date": _parse_date(cells[ci_date]) if ci_date is not None and ci_date < len(cells) else None,
                 "status": status,
                 "paper": "페이퍼" in status,
-                "score": float(sc.group(1) or sc.group(2)) if sc else None,
+                "score": float(sc.group(1) or sc.group(2) or sc.group(3)) if sc else None,
                 "source": source,
             })
     return out
@@ -222,7 +225,9 @@ def main() -> int:
 
     if not args.dry_run:
         out = [f"# TRACKING — 시드/포지션 사후 추적", "",
-               f"_생성: {datetime.now().isoformat(timespec='minutes')} · `scripts/track.py`_", ""]
+               f"_생성: {datetime.now().isoformat(timespec='minutes')} · `scripts/track.py`_",
+               "_**가격 수익률** — 거래비용·세금(해외주식 양도세 22%)·환율·배당 미반영. "
+               "기준가=기록 시점(시드/결정) 가격이며 워치리스트 시드는 산 적 없는 가상 기준._", ""]
         if cohort_lines:
             out.append("**코호트별** (시드일 기준 — 보유기간 다르면 비교는 시간 필요):")
             out += [f"- {ln}" for ln in cohort_lines]

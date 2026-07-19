@@ -78,6 +78,12 @@ def main() -> int:
     ap.add_argument("--reset-increase", type=float, default=cooldown.DEFAULT_RESET_INCREASE,
                     help="re-alert sooner if score beats the last alert by this much")
     ap.add_argument("--no-cooldown", action="store_true", help="disable cooldown (alert top-N regardless)")
+    ap.add_argument("--max-price-age-hours", type=float, default=12.0,
+                    help="price-cache freshness for this scan (default 12h — strictly shorter "
+                         "than the 24h cron cycle so a run can never serve the previous day's "
+                         "prices from cache; the 2026-07-16 stale-snapshot incident)")
+    ap.add_argument("--no-fresh-guard", action="store_true",
+                    help="skip the price-freshness abort/warn (backfills, offline runs)")
     ap.add_argument("--no-enrich", action="store_true",
                     help="skip valuation/fundamentals precompute sidecars")
     ap.add_argument("--enrich-types", nargs="+", default=["common", "preferred"], choices=SECURITY_TYPES,
@@ -98,6 +104,7 @@ def main() -> int:
         args.markets, base_params=base, years=args.years,
         include_types=args.types, progress_cb=cb,
         apply_liquidity=not args.no_liquidity,
+        max_age_days=args.max_price_age_hours / 24.0,
     )
     print(f"base survivors: {len(cands)} (liquidity floor "
           f"{'off' if args.no_liquidity else 'on'})", flush=True)
@@ -111,6 +118,41 @@ def main() -> int:
         print(f"ABORT: survivors {len(cands)} (per market {per_market}) below "
               "floor — refusing to overwrite the last good snapshot", flush=True)
         return 1
+
+    # Price-freshness guard (2026-07-16 incident: cron jitter × 1d cache TTL let
+    # a run finish in 10min on full cache hits, republishing Wednesday's prices
+    # as Thursday's snapshot — a green run with stale data that the paper cohort
+    # then recorded as entry prices). >1 business day behind = abort before the
+    # good snapshot is overwritten; exactly 1 behind (holiday or one stale day)
+    # = loud warning that also rides the Telegram alert.
+    stale_warn: list[str] = []
+    if not args.no_fresh_guard:
+        import datetime as _dt
+
+        def _biz_days_behind(last: _dt.date, today: _dt.date) -> int:
+            n, cur = 0, last
+            while cur < today:
+                cur += _dt.timedelta(days=1)
+                if cur.weekday() < 5:
+                    n += 1
+            return n
+
+        today_utc = _dt.datetime.now(_dt.timezone.utc).date()
+        for m in args.markets:
+            dates = [c.prices.index.max() for c in cands
+                     if c.market == m and c.prices is not None and not c.prices.empty]
+            if not dates:
+                continue
+            last = max(dates).date()
+            behind = _biz_days_behind(last, today_utc)
+            if behind > 1:
+                print(f"ABORT: {m} last price {last} is {behind} business days old — "
+                      "stale cache; refusing to publish (see --no-fresh-guard)", flush=True)
+                return 1
+            if behind == 1:
+                msg = f"{m} 시세 {last} (1영업일 낡음 — 휴장 또는 캐시 확인)"
+                stale_warn.append(msg)
+                print(f"WARN: {msg}", flush=True)
 
     out_path = snapshot.export_candidates(cands, args.out)
     print(f"snapshot written: {out_path} ({len(cands)} tickers)", flush=True)
@@ -197,6 +239,8 @@ def main() -> int:
     # a green Actions run, so surface freshness + fill% in the push itself.
     health = snapshot.load_health(None)
     lines = [header]
+    if stale_warn:
+        lines.append("⚠️ " + " · ".join(stale_warn))
     if health:
         sf = health.get("signal_fill") or {}
         fa = health.get("fundamentals_available")
