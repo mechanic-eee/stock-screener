@@ -99,6 +99,7 @@ def _records_from(path: Path, source: str) -> list[dict]:
         ci_tkr = _col(header, "티커", "종목")
         ci_px = _col(header, "진입가", "진입", "현재가", "당시")  # "진입 관심구간" 셀의 '현재가 X 부근'
         ci_stop = _col(header, "손절")
+        ci_qty = _col(header, "수량")
         ci_date = _col(header, "시드", "갱신", "날짜", exclude="촉매")  # avoid '촉매/이벤트 (날짜)'
         ci_status = _col(header, "상태")
         if ci_tkr is None or ci_px is None:
@@ -126,6 +127,7 @@ def _records_from(path: Path, source: str) -> list[dict]:
                 "ticker": ticker,
                 "market": "KR" if ticker.isdigit() and len(ticker) == 6 else "US",
                 "ref_price": ref,
+                "shares": _num(cells[ci_qty]) if ci_qty is not None and ci_qty < len(cells) else None,
                 "stop": _num(cells[ci_stop]) if ci_stop is not None and ci_stop < len(cells) else None,
                 "date": _parse_date(cells[ci_date]) if ci_date is not None and ci_date < len(cells) else None,
                 "status": status,
@@ -134,6 +136,30 @@ def _records_from(path: Path, source: str) -> list[dict]:
                 "source": source,
             })
     return out
+
+
+def _merge_tranches(rows: list[dict]) -> dict:
+    """같은 티커의 '보유' 트랜치 행들을 포지션 하나로 합성.
+
+    수량 가중평단(수량 없으면 단순평균 폴백) · 진입일=최초 트랜치(보유기간 기준) ·
+    손절=가장 최근 결정의 값 · 수량=합. 예전 단일 티커 키는 2차 트랜치가 1차
+    기록을 통째로 덮어썼다(감사 2026-07-19 [중-9] — 8/10 2차 집행 전 수정)."""
+    rows = sorted(rows, key=lambda r: (r["date"] is None, r["date"] or date.min))
+    base = dict(rows[0])
+    if len(rows) == 1:
+        return base
+    ws = [(r["ref_price"], r.get("shares") or 0) for r in rows]
+    tot = sum(s for _, s in ws)
+    if tot > 0:
+        base["ref_price"] = sum(p * s for p, s in ws) / tot
+        base["shares"] = tot
+    else:
+        base["ref_price"] = sum(p for p, _ in ws) / len(ws)
+    stops = [r.get("stop") for r in rows if r.get("stop")]
+    if stops:
+        base["stop"] = stops[-1]
+    base["source"] = f"{base.get('source', 'decision')}×{len(rows)}"
+    return base
 
 
 def _current_price(market: str, ticker: str):
@@ -181,12 +207,26 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="콘솔만, TRACKING.md 안 씀")
     args = ap.parse_args()
 
-    # DECISIONS positions take priority over watchlist seeds for the same ticker
-    recs: dict[str, dict] = {}
+    # DECISIONS positions take priority over watchlist seeds for the same ticker.
+    # Within DECISIONS, held tranche rows of one ticker merge into a single
+    # position (weighted-average entry); closed rows stay separate episodes,
+    # keyed (ticker, date, status) so nothing silently overwrites anything.
+    from collections import defaultdict
+
+    recs: dict[object, dict] = {}
     for r in _records_from(WATCHLIST, "watchlist"):
         recs.setdefault(r["ticker"], r)
+    by_ticker: dict[str, list[dict]] = defaultdict(list)
     for r in _records_from(DECISIONS, "decision"):
-        recs[r["ticker"]] = r  # override
+        by_ticker[r["ticker"]].append(r)
+    for tkr, drows in by_ticker.items():
+        recs.pop(tkr, None)  # a decision replaces the watchlist seed row
+        held = [r for r in drows if "보유" in (r.get("status") or "")]
+        if held:
+            recs[(tkr, "position")] = _merge_tranches(held)
+        for r in drows:
+            if r not in held:
+                recs[(tkr, r.get("date"), r.get("status"))] = r
     items = list(recs.values())
     if not items:
         print("추적할 항목이 없습니다 (WATCHLIST/DECISIONS에 티커+가격 행 필요).")

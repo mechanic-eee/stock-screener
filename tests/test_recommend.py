@@ -92,6 +92,35 @@ def test_paper_cohorts() -> None:
     print("  paper: record flag + cohort split + decide-format score OK")
 
 
+def test_tranche_merge() -> None:
+    """2nd tranche must merge (weighted avg), not overwrite tranche 1 (audit 중-9)."""
+    import track
+
+    md = "\n".join([
+        "## 📌 포지션",
+        "| 날짜 | 티커 | 액션 | 진입가 | 손절 | 수량 | 비중 | 논거 | 상태 | 청산 |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+        "| 2026-07-18 | NVO | 매수 | 49.00 | 42.13 | 20 | 10% | x (점수 93) | 보유(페이퍼) | — |",
+        "| 2026-08-10 | NVO | 추가매수 | 51.00 | 44.00 | 10 | 5% | 2차 (점수 91) | 보유(페이퍼) | — |",
+        "| 2026-07-18 | TROX | 매수 | 7.55 | 6.00 | 100 | 8% | x (점수 80) | 청산 | 6.10 (-19.2%) |",
+    ])
+    p = Path(tempfile.mkdtemp()) / "DECISIONS.md"
+    p.write_text(md, encoding="utf-8")
+
+    from collections import defaultdict
+    by = defaultdict(list)
+    for r in track._records_from(p, "decision"):
+        by[r["ticker"]].append(r)
+
+    merged = track._merge_tranches([r for r in by["NVO"] if "보유" in r["status"]])
+    assert abs(merged["ref_price"] - (49.00 * 20 + 51.00 * 10) / 30) < 1e-9, merged
+    assert merged["shares"] == 30 and merged["stop"] == 44.00, merged
+    assert merged["date"].isoformat() == "2026-07-18", merged   # holding starts at tranche 1
+    assert merged["source"].endswith("×2"), merged
+    assert len(by["TROX"]) == 1 and "청산" in by["TROX"][0]["status"]
+    print("  tranche merge: weighted avg + latest stop + first date OK")
+
+
 def test_score_regex_formats() -> None:
     import track
 
@@ -121,6 +150,7 @@ def test_biz_days_behind() -> None:
 def main() -> int:
     test_gates()
     test_paper_cohorts()
+    test_tranche_merge()
     test_score_regex_formats()
     test_biz_days_behind()
     print("✅ test_recommend: all passed")

@@ -34,9 +34,17 @@ except Exception:
 
 
 def _held_positions() -> list[dict]:
-    """보유 상태의 DECISIONS 포지션만 (워치리스트 관심행은 제외)."""
-    recs = track._records_from(track.DECISIONS, "decision")
-    return [r for r in recs if "보유" in (r.get("status") or "")]
+    """보유 상태의 DECISIONS 포지션만 (워치리스트 관심행은 제외).
+
+    같은 티커의 트랜치 행들은 track._merge_tranches로 합성 — 감시는 포지션당
+    한 번, 손절은 가장 최근 결정의 값으로 본다."""
+    from collections import defaultdict
+
+    by: dict[str, list[dict]] = defaultdict(list)
+    for r in track._records_from(track.DECISIONS, "decision"):
+        if "보유" in (r.get("status") or ""):
+            by[r["ticker"]].append(r)
+    return [track._merge_tranches(v) for v in by.values()]
 
 
 def _distress(market: str, ticker: str) -> list[str] | None:
