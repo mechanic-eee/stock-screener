@@ -132,6 +132,7 @@ def _records_from(path: Path, source: str) -> list[dict]:
                 "date": _parse_date(cells[ci_date]) if ci_date is not None and ci_date < len(cells) else None,
                 "status": status,
                 "paper": "페이퍼" in status,
+                "veto": bool(re.search(r"베토|랭크컷", " ".join(cells))),
                 "score": float(sc.group(1) or sc.group(2) or sc.group(3)) if sc else None,
                 "source": source,
             })
@@ -176,10 +177,29 @@ def _fmt(market: str, v) -> str:
     return f"{v:,.0f}원" if market == "KR" else f"${v:,.2f}"
 
 
-def _cohort_summary(valid: list[dict]) -> list[str]:
+def _bench_return(market: str, since) -> float | None:
+    """벤치마크(코스피/S&P) 동기간 수익률 — '코호트 +4%'가 시장 베타인지 엣지인지
+    구분하는 외부 기준(감사 §2-2: 판정 기준 부재). 실패는 None(라인 생략)."""
+    try:
+        import pandas as pd
+
+        from screener import benchmark
+        s = benchmark.get_benchmark(market)
+        if s is None or s.empty:
+            return None
+        s2 = s[s.index >= pd.Timestamp(since)]
+        if len(s2) < 2:
+            return None
+        return float((s2.iloc[-1] / s2.iloc[0] - 1) * 100.0)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _cohort_summary(valid: list[dict], with_bench: bool = False) -> list[str]:
     """One line per seed-date cohort (n, avg return, win, days) — a fair
     base-only vs enrichment comparison needs equal holding time, so we never
-    pool across dates for the headline."""
+    pool across dates for the headline. with_bench=True appends the same-period
+    KOSPI/S&P return (network; off by default so tests stay hermetic)."""
     from collections import defaultdict
 
     cohorts: dict[object, list] = defaultdict(list)
@@ -198,7 +218,23 @@ def _cohort_summary(valid: list[dict]) -> list[str]:
                 else (f" · 점수 {scores[0]}" if scores else ""))
         label = (d.isoformat() if d else "날짜없음") + (" [페이퍼]" if paper else "")
         dd = f"{days}d" if days is not None else "—"
-        lines.append(f"{label} ({dd}, {len(cr)}종목{stag}): 평균 {avg:+.1f}%, 승률 {win:.0%}")
+        line = f"{label} ({dd}, {len(cr)}종목{stag}): 평균 {avg:+.1f}%, 승률 {win:.0%}"
+        # 베토군 라벨은 '베토/랭크컷' 표기가 실제로 있는 제외 코호트만 — 상태만
+        # 보면 5/25 미큐레이션 폐기(base) 코호트가 오탐된다
+        statuses = [x.get("status") or "" for x in cr]
+        if (statuses and all("제외" in s for s in statuses)
+                and any(x.get("veto") for x in cr)):
+            line += " · 베토군(관망 사후추적)"
+        if with_bench and d is not None:
+            bts = []
+            for mk, nm in (("KR", "KOSPI"), ("US", "S&P")):
+                if any(x.get("market") == mk for x in cr):
+                    br = _bench_return(mk, d)
+                    if br is not None:
+                        bts.append(f"{nm} {br:+.1f}%")
+            if bts:
+                line += " (vs " + " · ".join(bts) + ")"
+        lines.append(line)
     return lines
 
 
@@ -254,7 +290,7 @@ def main() -> int:
               f"{_fmt(r['market'], r['current']):>12}{ret:>9}{vs:>9}{dd:>7}  {r['source']}")
 
     valid = [r for r in rows if r["ret"] is not None]
-    cohort_lines = _cohort_summary(valid)
+    cohort_lines = _cohort_summary(valid, with_bench=True)
     avg = (sum(r["ret"] for r in valid) / len(valid)) if valid else 0.0
     win = (sum(1 for r in valid if r["ret"] > 0) / len(valid)) if valid else 0.0
     if cohort_lines:

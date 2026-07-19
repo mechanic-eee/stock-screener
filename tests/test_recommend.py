@@ -57,12 +57,14 @@ def test_gates() -> None:
     assert "부도 이중확인" in reasons["ZOMBIE"], reasons
     assert "유동성" in reasons["ILLIQ"], reasons
 
-    # no-turnover-data rows must not be dropped by the liquidity gate (fail-soft)
+    # no-turnover-data rows must not be dropped by the liquidity gate, but must
+    # be MARKED unchecked (3-state — silent pass was the audit's fail-open find)
     nodata = _row("NODATA")
     nodata.pop("avg_turnover")
     kept2, dropped2 = apply_gates([nodata])
     assert kept2 and not dropped2, dropped2
-    print("  gates: ordering + reasons + AND-combo + fail-soft OK")
+    assert "미검증" in kept2[0].get("_liquidity", ""), kept2[0]
+    print("  gates: ordering + reasons + AND-combo + unchecked-marking OK")
 
 
 def test_paper_cohorts() -> None:
@@ -135,6 +137,39 @@ def test_score_regex_formats() -> None:
     print("  score regex: 3 formats OK")
 
 
+def test_upcoming_events() -> None:
+    """monitor event reminders: watchlist catalyst M/D + DECISIONS tranche/review."""
+    import monitor
+    import track
+
+    tmp = Path(tempfile.mkdtemp())
+    wl = tmp / "WATCHLIST.md"
+    wl.write_text("\n".join([
+        "| 종목 (티커) | 한줄 논거 | 진입 | 손절선 | 촉매/이벤트 (날짜) | 상태 | 갱신일 |",
+        "|---|---|---|---|---|---|---|",
+        "| Boston Scientific (BSX) | x | $43.04 | $39.16 | 2Q 실적 (7/29 확정) | 보유(페이퍼) | 2026-07-18 |",
+        "| NerdWallet (NRDS) | x | $9.53 | — | 2Q 실적 (8/6 확정) | 제외 | 2026-07-18 |",
+    ]), encoding="utf-8")
+    dc = tmp / "DECISIONS.md"
+    dc.write_text("- [2026-07-18] 2차 트랜치 결정 8/10(월), 120d 리뷰 2026-11-16.",
+                  encoding="utf-8")
+
+    old_wl, old_dc = track.WATCHLIST, track.DECISIONS
+    track.WATCHLIST, track.DECISIONS = wl, dc
+    try:
+        events = monitor._upcoming_events({"BSX"})   # NRDS not held -> excluded
+    finally:
+        track.WATCHLIST, track.DECISIONS = old_wl, old_dc
+
+    labels = [lbl for _, lbl in events]
+    assert any("BSX" in lbl for lbl in labels), events
+    assert not any("NRDS" in lbl for lbl in labels), events
+    assert any("2차 트랜치" in lbl for lbl in labels), events
+    assert any("120d 리뷰" in lbl for lbl in labels), events
+    assert events == sorted(events, key=lambda e: e[0]), events
+    print("  events: held-only catalyst + tranche/review parse OK")
+
+
 def test_biz_days_behind() -> None:
     from datetime import date
 
@@ -151,6 +186,7 @@ def main() -> int:
     test_gates()
     test_paper_cohorts()
     test_tranche_merge()
+    test_upcoming_events()
     test_score_regex_formats()
     test_biz_days_behind()
     print("✅ test_recommend: all passed")

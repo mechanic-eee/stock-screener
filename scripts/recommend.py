@@ -107,7 +107,10 @@ def apply_gates(rows: list[dict], atr_max: float = 8.0,
             continue
         to = r.get("avg_turnover")
         pv = r.get("pos_value")
-        if to and pv and pv > to * (turnover_cap_pct / 100.0):
+        if not to or not pv:
+            # 결측=무음 통과가 아니라 '미검증'으로 표기 (다른 게이트와 일관된 3-상태)
+            r["_liquidity"] = "미검증(거래대금/사이징 데이터 없음 — 수동 확인)"
+        elif pv > to * (turnover_cap_pct / 100.0):
             dropped.append((r, f"유동성(포지션 {pv:,.0f} > 20일 거래대금 {to:,.0f}의 "
                                f"{turnover_cap_pct:.0f}%) [재량]"))
             continue
@@ -163,19 +166,84 @@ def _attach_drafts(rows: list[dict], px: dict, stop_mult: float,
                 r["stop_pct"] = s["stop_pct"]
 
 
-def _regime(markets: list[str]) -> dict[str, bool | None]:
-    """시장별 200일선 위 여부 (스냅샷 프라임 후라 라이브 fetch 없음). None=판정불가."""
+def _regime(markets: list[str]) -> dict[str, dict]:
+    """시장별 {above: bool|None, asof: date|None}. None=판정불가 — 호출자는
+    fail-closed(신규 차단과 동일)로 다뤄야 한다. asof는 벤치마크 최종일: 낡은
+    사이드카로 200일선을 판정하고도 모르는 사각(감사 [중-7])을 없앤다."""
     from screener import benchmark
 
-    out: dict[str, bool | None] = {}
+    out: dict[str, dict] = {}
     for mk in markets:
+        above = asof = None
         try:
             s = benchmark.get_benchmark(mk)
-            out[mk] = (float(s.iloc[-1]) >= float(s.tail(200).mean())
-                       if s is not None and len(s) >= 200 else None)
+            if s is not None and len(s) >= 200:
+                above = float(s.iloc[-1]) >= float(s.tail(200).mean())
+                asof = s.index.max().date()
         except Exception:  # noqa: BLE001
-            out[mk] = None
+            pass
+        out[mk] = {"above": above, "asof": asof}
     return out
+
+
+def _attach_sectors(finalists: list[dict]) -> None:
+    """섹터를 후보에 부착(캐시 우선)하고 동일 섹터 중복을 표기 — 설계 단계 2의
+    '섹터당 1종목' 규칙을 수동 기억이 아니라 표면에 노출한다.
+
+    KR=FDR KRX 목록의 Sector(1회 fetch 후 캐시), US=yfinance .info sector
+    (로컬에서만 동작 — 티커별 영구 캐시). 실패는 '미상'으로 fail-soft.
+    """
+    import json
+
+    cache_path = ROOT / "data" / "sectors.json"
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
+    except Exception:  # noqa: BLE001
+        cache = {}
+    cache.setdefault("KR", {})
+    cache.setdefault("US", {})
+
+    kr_missing = [r["ticker"] for r in finalists
+                  if r["market"] == "KR" and r["ticker"] not in cache["KR"]]
+    if kr_missing:
+        try:
+            import FinanceDataReader as fdr
+            listing = fdr.StockListing("KRX")
+            m = dict(zip(listing["Code"].astype(str), listing["Sector"].astype(str)))
+            for t in kr_missing:
+                s = m.get(t)
+                cache["KR"][t] = s if s and s != "nan" else "미상"
+        except Exception:  # noqa: BLE001
+            for t in kr_missing:
+                cache["KR"].setdefault(t, "미상")
+    for r in finalists:
+        if r["market"] != "US" or r["ticker"] in cache["US"]:
+            continue
+        try:
+            import yfinance as yf
+            cache["US"][r["ticker"]] = yf.Ticker(r["ticker"]).info.get("sector") or "미상"
+        except Exception:  # noqa: BLE001
+            cache["US"][r["ticker"]] = "미상"
+    try:
+        cache_path.parent.mkdir(exist_ok=True)
+        cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+    from collections import defaultdict
+
+    by_sector: dict[str, list[dict]] = defaultdict(list)
+    for r in finalists:
+        r["_sector"] = cache[r["market"]].get(r["ticker"], "미상")
+        if r["_sector"] != "미상":
+            by_sector[r["_sector"]].append(r)
+    for sector, rs in by_sector.items():
+        if len(rs) < 2:
+            continue
+        rs.sort(key=lambda x: -(x.get("점수") or 0))
+        top = rs[0]["ticker"]
+        for r in rs[1:]:
+            r["_sector_dup"] = top
 
 
 def _fresh_distress(market: str, ticker: str) -> list[str] | None:
@@ -214,22 +282,27 @@ def _checklist_md(finalists: list[dict], dropped_all: list[tuple[dict, str]],
     if acct_line:
         out += [f"**{acct_line}**", ""]
     reg_parts = []
-    for mk, above in regime.items():
-        tag = "판정불가" if above is None else ("200일선↑ 진입가능" if above else "200일선↓ 신규차단(페이퍼만)")
-        reg_parts.append(f"{mk} {tag}")
+    for mk, r in regime.items():
+        above = r.get("above")
+        tag = ("판정불가 → 신규보류(fail-closed)" if above is None
+               else ("200일선↑ 진입가능" if above else "200일선↓ 신규차단(페이퍼만)"))
+        asof_b = f"(기준 {r['asof']})" if r.get("asof") else ""
+        reg_parts.append(f"{mk} {tag}{asof_b}")
     out += [f"**레짐:** {' · '.join(reg_parts)}", ""]
     out += [f"**비용 리마인더:** 왕복 KR {COST_NOTE['KR'][0]}({COST_NOTE['KR'][1]}) · "
             f"US {COST_NOTE['US'][0]}({COST_NOTE['US'][1]}) — 검증 엣지 +1.3~3.8%p/픽의 "
             "12~35%가 비용. 2트랜치 분할해도 %비용은 동일(금액 비례).", ""]
     for r in finalists:
         mk, t = r["market"], r["ticker"]
-        paper_only = regime.get(mk) is False
+        # fail-closed: 판정불가(None)도 신규 차단과 동일 취급
+        paper_only = regime.get(mk, {}).get("above") is not True
         star = "⭐ " if r.get("_priority") else ""
         rank = (f" · {mk} {r['_rank']}/{r['_rank_n']}위" if r.get("_rank") else "")
-        head = (f"## {star}{t} — {r.get('name', '')} ({mk}) · 점수 {r.get('점수')}{rank} · "
+        sector = (f" · {r['_sector']}" if r.get("_sector") and r["_sector"] != "미상" else "")
+        head = (f"## {star}{t} — {r.get('name', '')} ({mk}) · 점수 {r.get('점수')}{rank}{sector} · "
                 f"낙폭 {r.get('하락률', 0):.0f}% · ATR {r.get('atr_pct', 0):.1f}%")
         if paper_only:
-            head += " · ⚠️ 레짐↓ 페이퍼 전용"
+            head += " · ⚠️ 레짐 미충족(하락 또는 판정불가) — 페이퍼 전용"
         out.append(head)
         stop_txt = (f"{_fmt(mk, r.get('stop'))} (−{r.get('stop_pct', 0):.1f}%)"
                     if r.get("stop") else "—")
@@ -237,14 +310,33 @@ def _checklist_md(finalists: list[dict], dropped_all: list[tuple[dict, str]],
                     f"({r.get('pos_pct', 0):.1f}%, R {risk_pct:.1f}%)"
                     if r.get("shares") else "산출 불가")
         distress = r.get("_distress", "통과")
+        from urllib.parse import quote
+
+        nm = str(r.get("name", t)).split(" - ")[0].split(" (")[0]
+        if mk == "KR":
+            links = (f"[DART 공시](https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm={quote(nm)}) · "
+                     f"[네이버뉴스](https://search.naver.com/search.naver?where=news&query={quote(nm)}) · "
+                     f"[네이버금융](https://finance.naver.com/item/main.naver?code={t})")
+        else:
+            links = (f"[EDGAR 8-K](https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={t}&type=8-K&count=10) · "
+                     f"[EDGAR S-1·424B](https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={t}&type=424&count=10) · "
+                     f"[구글뉴스](https://news.google.com/search?q={quote(t + ' stock')})")
+        extra = []
+        if r.get("_liquidity"):
+            extra.append(f"- ⚠️ 유동성: {r['_liquidity']}")
+        if r.get("_sector_dup"):
+            extra.append(f"- ⚠️ 섹터 중복: {r['_sector_dup']}와 동일 섹터({r.get('_sector')}) — "
+                         "픽은 섹터당 1(점수 상위 우선)")
         out += [f"- 위험공시 라이브 재점검: {distress}"
                 + (" ⚠️" if distress != "통과" else ""),
+                *extra,
+                f"- 조사 링크: {links}",
                 f"- 진입초안 {_fmt(mk, r.get('close'))} · 손절초안 {stop_txt} · 수량초안 {size_txt}",
                 "- [ ] 낙폭 사유 한 문장 (구조적 소멸형=핵심사업 상실·규제 퇴출·존속위협 소송이면 탈락): ",
                 "- [ ] 진행 중 대규모 증자·CB 없음 (KR DART / US EDGAR S-1·424B)",
                 "- [ ] 현금+영업CF 18개월 생존 (점수 분해 + 최근 분기보고서)",
                 "- [ ] 다음 실적일: ____ — 첫 트랜치가 3일 이내면 실적 후로 이연 [재량]",
-                "- [ ] 섹터 중복 없음 (수동 — universe sector 미구축): ",
+                "- [ ] 섹터 중복 없음 (자동 감지 — 위 ⚠️ 섹터 중복 줄 없으면 통과, 미상이면 수동): ",
                 f"- 탈락 시: `python scripts/decide.py --ticker {t} --action 관망 --note \"<사유>\"`",
                 f"- 채택 시: `python scripts/to_watchlist.py --tickers {t}` → 큐레이션 → "
                 f"`python scripts/decide.py --ticker {t} --paper`  (첫 8주 페이퍼/반액)",
@@ -342,11 +434,17 @@ def main() -> int:
             r["_priority"] = i < args.priority
         finalists += kept
         dropped_all += dropped
+    _attach_sectors(finalists)
 
     today = date.today().isoformat()
-    reg_txt = " · ".join(
-        f"{mk} {'판정불가' if a is None else ('200일선↑' if a else '200일선↓ 신규차단')}"
-        for mk, a in regime.items())
+
+    def _reg_label(mk: str) -> str:
+        r = regime[mk]
+        tag = ("판정불가 → 신규보류(fail-closed)" if r["above"] is None
+               else ("200일선↑" if r["above"] else "200일선↓ 신규차단"))
+        return f"{mk} {tag}" + (f"(기준 {r['asof']})" if r["asof"] else "")
+
+    reg_txt = " · ".join(_reg_label(mk) for mk in regime)
     acct_line = (f"계좌 가정: KR ₩{cfg['account_krw']:,.0f} · US ${cfg['account_usd']:,.0f} · "
                  f"R {args.risk:.1f}% ({cfg.get('_source', 'data/portfolio.json')}) — "
                  "실계좌와 다르면 수량·비중은 예시일 뿐")
@@ -356,11 +454,9 @@ def main() -> int:
     print(f"레짐: {reg_txt}")
     print(f"비용: 왕복 KR {COST_NOTE['KR'][0]} · US {COST_NOTE['US'][0]} "
           f"(vs 엣지 +1.3~3.8%p/픽 — 잠식 주의)")
-    reg_known = [v for v in regime.values() if v is not None]
-    if reg_known and not any(reg_known):
-        print("⚠️ 전 시장 200일선 아래 — 이번 주 신규 진입 없음, 아래 후보는 페이퍼 전용.")
-    elif not reg_known:
-        print("⚠️ 레짐 판정불가(벤치마크 데이터 없음) — 200일선 위 확인 전 신규 진입 보류 권장.")
+    if not any(r["above"] is True for r in regime.values()):
+        print("⚠️ 진입 가능 레짐인 시장 없음(200일선 아래 또는 판정불가) — "
+              "이번 주 신규 없음, 아래 후보는 페이퍼 전용.")
 
     n_unchecked = sum(1 for r in finalists if r.get("_distress", "통과") != "통과")
     print(f"\n게이트 통과 {len(finalists)}종목 (상위 {args.top}/시장 → 사람 체크 후보, "
@@ -378,6 +474,11 @@ def main() -> int:
                   f"{r.get('atr_pct', 0):>6.1f}{_fmt(mk, r.get('close')):>12}"
                   f"{_fmt(mk, r.get('stop')):>12}{r.get('shares', 0):>8,}"
                   f"{r.get('pos_pct', 0):>5.1f}%")
+    dups = [r for r in finalists if r.get("_sector_dup")]
+    if dups:
+        print("섹터 중복(픽은 섹터당 1 — 점수 상위 우선): "
+              + ", ".join(f"{r['ticker']}↔{r['_sector_dup']}({r.get('_sector')})" for r in dups))
+
     print(f"\n게이트 탈락 {len(dropped_all)}종목:")
     for r, why in dropped_all:
         print(f"  {r['ticker']:<8}({r['market']}, {r.get('점수')}) — {why}")

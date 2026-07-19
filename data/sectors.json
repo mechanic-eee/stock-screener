@@ -1,0 +1,29 @@
+{
+ "KR": {
+  "002790": "미상",
+  "259630": "미상",
+  "260970": "미상",
+  "215200": "미상",
+  "008490": "미상",
+  "018290": "미상",
+  "108670": "미상",
+  "215000": "미상",
+  "000080": "미상",
+  "383220": "미상",
+  "003850": "미상"
+ },
+ "US": {
+  "NVO": "Healthcare",
+  "NRDS": "Communication Services",
+  "SIRI": "Communication Services",
+  "TME": "Communication Services",
+  "BSX": "Healthcare",
+  "GOOS": "Consumer Cyclical",
+  "ADMA": "Healthcare",
+  "ROKU": "Communication Services",
+  "DXCM": "Healthcare",
+  "AMN": "Healthcare",
+  "MNSO": "Consumer Cyclical",
+  "OTEX": "Technology"
+ }
+}

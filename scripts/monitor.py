@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import re
 import sys
 from pathlib import Path
 
@@ -74,11 +76,92 @@ def _distress(market: str, ticker: str) -> list[str] | None:
     return flags
 
 
+def _upcoming_events(held_tickers: set[str]) -> list[tuple[dt.date, str]]:
+    """(날짜, 라벨) — 보유 종목의 WATCHLIST 촉매 셀(M/D)과 DECISIONS 로그의
+    2차 트랜치·리뷰 날짜를 파싱. 날짜 약속이 마크다운에만 적혀 있고 아무 코드도
+    그날 알려주지 않던 갭(감사 M5)의 자동화. M/D는 가까운 미래로 연도 추론."""
+    today = dt.date.today()
+
+    def _md(m: str, d: str) -> dt.date | None:
+        try:
+            ev = dt.date(today.year, int(m), int(d))
+        except ValueError:
+            return None
+        return ev if (today - ev).days <= 30 else dt.date(today.year + 1, int(m), int(d))
+
+    events: list[tuple[dt.date, str]] = []
+    try:
+        for header, data in track._tables(track.WATCHLIST.read_text(encoding="utf-8")):
+            ci_t, ci_cat = track._col(header, "티커", "종목"), track._col(header, "촉매")
+            if ci_t is None or ci_cat is None:
+                continue
+            for cells in data:
+                if len(cells) <= max(ci_t, ci_cat):
+                    continue
+                mt = (track._TICKER.search(cells[ci_t])
+                      or re.search(r"\b(\d{6})\b", cells[ci_t]))
+                tkr = mt.group(1) if mt else cells[ci_t].strip().upper()
+                if tkr not in held_tickers:
+                    continue
+                for m, d in re.findall(r"(\d{1,2})/(\d{1,2})", cells[ci_cat]):
+                    ev = _md(m, d)
+                    if ev:
+                        label = cells[ci_cat].split("(")[0].strip() or "이벤트"
+                        events.append((ev, f"{tkr} {label}"))
+    except Exception:  # noqa: BLE001 — 리마인더는 감시 본체를 깨지 않는다
+        pass
+    try:
+        dtext = track.DECISIONS.read_text(encoding="utf-8")
+        m2 = re.search(r"2차 트랜치[^\d]{0,10}(\d{1,2})/(\d{1,2})", dtext)
+        if m2:
+            ev = _md(m2.group(1), m2.group(2))
+            if ev:
+                events.append((ev, "2차 트랜치 결정"))
+        for iso in re.findall(r"리뷰\s*(20\d{2}-\d{2}-\d{2})", dtext):
+            try:
+                events.append((dt.date.fromisoformat(iso), "120d 리뷰"))
+            except ValueError:
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+    seen: set = set()
+    out = []
+    for ev, lbl in sorted(events):
+        if ev >= today and (ev, lbl) not in seen:
+            seen.add((ev, lbl))
+            out.append((ev, lbl))
+    return out
+
+
+def _rank_check(held: list[dict]) -> dict | None:
+    """보유 종목의 현 스냅샷 enrichment 랭킹 — thesis-break '하위 50% 강등'과
+    2차 트랜치 취소 조건('상위 25% 밖')의 자동화(SMCI 수동 적발의 코드화).
+    반환 {ticker: (rank|None, n)} 또는 None(미수행 — 스냅샷 로드 실패)."""
+    try:
+        import recommend as rec
+
+        rows, _ = rec._load_rows(rec.twl.DEFAULT_SNAPSHOT, 50, 5)
+        by_mkt: dict[str, list[str]] = {}
+        for mk in {r["market"] for r in held}:
+            by_mkt[mk] = [r["ticker"] for r in rows if r.get("market") == mk
+                          and r.get("_security_type", "common") in ("common", "preferred")]
+        out = {}
+        for it in held:
+            lst = by_mkt.get(it["market"], [])
+            rk = (lst.index(it["ticker"]) + 1) if it["ticker"] in lst else None
+            out[it["ticker"]] = (rk, len(lst))
+        return out
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--telegram", action="store_true", help="알림이 있으면 텔레그램 전송")
     ap.add_argument("--loss-alert", type=float, default=30.0, help="이 %% 이상 손실이면 경고(기본 30)")
     ap.add_argument("--no-distress", action="store_true", help="DART/펀더 위험 재점검 생략(빠름)")
+    ap.add_argument("--no-rank-check", action="store_true",
+                    help="스냅샷 랭킹 강등 체크 생략(스냅샷 다운로드·랭킹 ~1분 절약)")
     args = ap.parse_args()
 
     held = _held_positions()
@@ -88,8 +171,11 @@ def main() -> int:
         return 0
 
     print(f"보유 {len(held)}종목 감시 — 현재가/위험 재점검 중...", flush=True)
+    events = _upcoming_events({it["ticker"] for it in held})
+    ranks = None if args.no_rank_check else _rank_check(held)
     alerts: list[str] = []        # 종목별 치명/경고 한 줄
     lines: list[str] = []          # 콘솔 상태표
+    vs_list: list[tuple[float, str]] = []   # (손절여유, 티커) — 하트비트용
     for it in held:
         mkt, tkr = it["market"], it["ticker"]
         cur = track._current_price(mkt, tkr)
@@ -112,7 +198,20 @@ def main() -> int:
             else:
                 for x in d:
                     flags.append(f"🔴 {x}")
+        if not args.no_rank_check:
+            if ranks is None:
+                soft.append("⚪ 랭킹 체크 미수행(스냅샷 로드 실패)")
+            else:
+                rk, n = ranks.get(tkr, (None, 0))
+                if rk is None:
+                    soft.append("ℹ️ 스냅샷 후보 이탈 — 낙폭 기준 회복(졸업) 가능성, 확인")
+                elif n and rk > n * 0.5:
+                    flags.append(f"🟠 랭킹 하위 50% 강등({rk}/{n}) — thesis 재평가")
+                elif n and rk > n * 0.25:
+                    soft.append(f"ℹ️ 랭킹 상위 25% 밖({rk}/{n}) — 2차 트랜치 취소 조건 해당")
         vs_stop = ((cur - stop) / cur * 100.0) if (cur and stop) else None
+        if vs_stop is not None:
+            vs_list.append((vs_stop, tkr))
         status = (f"{track._fmt(mkt, cur)} · {ret:+.1f}%" if ret is not None else "가격없음")
         vs = f" · 손절여유 {vs_stop:+.0f}%" if vs_stop is not None else ""
         shown = flags + soft
@@ -125,6 +224,16 @@ def main() -> int:
     print("\n보유 포지션 상태:")
     for ln in lines:
         print(ln)
+
+    if events:
+        print("\n다가오는 이벤트:")
+        for ev, lbl in events[:5]:
+            print(f"  {ev.strftime('%m/%d')} D-{(ev - dt.date.today()).days:<3} {lbl}")
+        # D-3 이내는 알림으로 승격 — 캘린더 수동 의존을 백업한다
+        for ev, lbl in events:
+            d_left = (ev - dt.date.today()).days
+            if d_left <= 3:
+                alerts.append(f"🗓 {lbl} D-{d_left} ({ev.strftime('%m/%d')})")
 
     if alerts:
         print(f"\n⚠️ thesis-break 알림 {len(alerts)}건 — 청산/재검토 후보:")
@@ -139,16 +248,23 @@ def main() -> int:
                 print(f"  (텔레그램 전송 실패: {e})")
     else:
         print("\n✅ 보유종목 전부 정상 — 손절/위험공시 이상 없음.")
-        # Monday heartbeat: '알림 없음'과 '감시가 죽어 있음'을 폰에서 구분할 수
-        # 있게 주 1회 생존 신호를 보낸다 (dead-man 원칙 — 침묵은 성공이 아니다).
+        # 일일 하트비트: '알림 없음'과 '감시가 죽어 있음'을 폰에서 구분(감사 M1 —
+        # 아침의 1순위 질문 "내 보유 무사한가"가 어떤 표면에도 없던 갭). 알림이
+        # 있는 날은 그 알림이 곧 생존 신호라 하트비트를 따로 안 보낸다.
         if args.telegram:
-            import datetime as _dt
-            if _dt.date.today().weekday() == 0:  # Monday
-                try:
-                    from screener.notify.telegram import send_message
-                    send_message("🩺 보유종목 감시 작동 중 — 이번 점검 알림 0건 (주간 하트비트)")
-                except Exception:  # noqa: BLE001
-                    pass
+            parts = [f"🩺 보유 {len(held)} 감시 정상 · 알림 0"]
+            if vs_list:
+                worst_vs, worst_t = min(vs_list)
+                parts.append(f"최소 손절여유 {worst_vs:+.0f}%({worst_t})")
+            if events:
+                ev, lbl = events[0]
+                parts.append(f"다음 이벤트 {lbl} {ev.strftime('%m/%d')}"
+                             f"(D-{(ev - dt.date.today()).days})")
+            try:
+                from screener.notify.telegram import send_message
+                send_message(" · ".join(parts))
+            except Exception:  # noqa: BLE001
+                pass
     return 0
 
 

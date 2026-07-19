@@ -22,13 +22,15 @@ try {
 $py = Join-Path $PSScriptRoot "..\.venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { $py = "python" }
 
+# Native exe stdout bypasses Start-Transcript unless routed through the host —
+# the log had empty TRACK/MONITOR sections until 2026-07-19 (audit finding).
 Write-Host "=== TRACK (seeds / positions: return, days, stop distance) ===" -ForegroundColor Cyan
-& $py (Join-Path $PSScriptRoot "track.py")
+& $py (Join-Path $PSScriptRoot "track.py") 2>&1 | Out-Host
 
 Write-Host "`n=== MONITOR (held positions: stop breach / new distress) ===" -ForegroundColor Cyan
 $mon = @((Join-Path $PSScriptRoot "monitor.py"))
 if ($Telegram) { $mon += "--telegram" }
-& $py $mon
+& $py $mon 2>&1 | Out-Host
 
 Write-Host "`n=== REMINDER ===" -ForegroundColor Yellow
 Write-Host " - Curate WATCHLIST 보류 rows (fill thesis/stop/catalyst, set 관심)."
