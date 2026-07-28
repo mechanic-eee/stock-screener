@@ -35,7 +35,8 @@ scripts/
   position_size.py     ATR 손절 기반 리스크 사이징
   track.py             시드/포지션 사후 추적 (점수 실효성)
   monitor.py           보유종목 손절이탈·DART위험공시 감시
-  daily.ps1            일일 리뷰 원클릭 (track+monitor)
+  review.py            개인 보유 규율 대시보드 (holdings.json → 규칙 판정, 서비스정의서: docs/규율-대시보드-서비스정의서.md)
+  daily.ps1            일일 리뷰 원클릭 (track+monitor+review, 평일 08:10 예약)
   selftest.py          검증된 가중치·파이프라인 회귀가드
 backtest/
   composite_decile_backtest.py  점수 검증 (production 필터를 PIT 슬라이스에 호출)
