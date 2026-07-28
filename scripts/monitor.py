@@ -251,6 +251,8 @@ def main() -> int:
                     help="보유 US 종목 EDGAR 신규공시 감시 생략")
     ap.add_argument("--weekly", action="store_true",
                     help="주간 성적표를 오늘 강제 출력/전송 (기본: 월요일 자동)")
+    ap.add_argument("--no-heartbeat", action="store_true",
+                    help="일일 하트비트 텔레그램 생략(review.py가 일일 맥박을 대신할 때). 알림·주간 성적표는 유지")
     args = ap.parse_args()
 
     held = _held_positions()
@@ -383,7 +385,7 @@ def main() -> int:
 
     # 일일 하트비트: '알림 없음'과 '감시가 죽어 있음'을 폰에서 구분(감사 M1).
     # 알림이 있는 날은 알림이, 주간 성적표가 나간 날은 성적표가 곧 생존 신호.
-    if args.telegram and not alerts and not weekly:
+    if args.telegram and not alerts and not weekly and not args.no_heartbeat:
         parts = [f"🩺 보유 {len(held)} 감시 정상 · 알림 0"]
         if vs_list:
             worst_vs, worst_t = min(vs_list)

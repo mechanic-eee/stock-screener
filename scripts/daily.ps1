@@ -27,10 +27,16 @@ if (-not (Test-Path $py)) { $py = "python" }
 Write-Host "=== TRACK (seeds / positions: return, days, stop distance) ===" -ForegroundColor Cyan
 & $py (Join-Path $PSScriptRoot "track.py") 2>&1 | Out-Host
 
-Write-Host "`n=== MONITOR (held positions: stop breach / new distress) ===" -ForegroundColor Cyan
+Write-Host "`n=== MONITOR (system positions: stop breach / distress / weekly report) ===" -ForegroundColor Cyan
 $mon = @((Join-Path $PSScriptRoot "monitor.py"))
-if ($Telegram) { $mon += "--telegram" }
+# review.py provides the daily heartbeat now; keep monitor's alerts + Monday weekly report
+if ($Telegram) { $mon += "--telegram"; $mon += "--no-heartbeat" }
 & $py $mon 2>&1 | Out-Host
+
+Write-Host "`n=== REVIEW (personal holdings: 규율 대시보드 — 줏을 거/버릴 거) ===" -ForegroundColor Cyan
+$rev = @((Join-Path $PSScriptRoot "review.py"))
+if ($Telegram) { $rev += "--telegram" }
+& $py $rev 2>&1 | Out-Host
 
 Write-Host "`n=== REMINDER ===" -ForegroundColor Yellow
 Write-Host " - Curate WATCHLIST 보류 rows (fill thesis/stop/catalyst, set 관심)."

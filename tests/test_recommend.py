@@ -159,6 +159,55 @@ def test_seed_cohort_survives_decision() -> None:
     print("  seed-cohort: older seed survives real decision, same-cycle dedup kept OK")
 
 
+def test_review_verdict() -> None:
+    """규율 대시보드 _verdict: 규칙별 태그/플래그 (타이밍 신호 없음, 규칙만)."""
+    import datetime as dt
+
+    import review
+    today = dt.date(2026, 7, 22)
+
+    def V(h, price, rank=None, distress=None, edgar=None):
+        return review._verdict(h, price, rank, distress, edgar, today)
+
+    # 손절 이탈 → 🔴
+    r = V({"market": "US", "cost": 50.0, "stop": 47.0}, 46.0)
+    assert r["tag"].startswith("🔴") and any("손절이탈" in f for f in r["flags"]), r
+
+    # 손절선 미설정 → 🟠 (규율 갭)
+    r = V({"market": "US", "cost": 50.0, "stop": None}, 60.0)
+    assert r["tag"].startswith("🟠") and any("손절선 미설정" in f for f in r["flags"]), r
+
+    # 손절 근접 → 🟠
+    r = V({"market": "US", "cost": 50.0, "stop": 47.0}, 49.0)
+    assert r["tag"].startswith("🟠") and any("손절근접" in f for f in r["flags"]), r
+
+    # 위험공시 → 🔴 (손절 여유 충분해도)
+    r = V({"market": "KR", "cost": 100.0, "stop": 50.0}, 90.0, distress=["감사의견 비적정"])
+    assert r["tag"].startswith("🔴") and any("감사의견" in f for f in r["flags"]), r
+
+    # 랭킹 하위 50% 강등 → 🟠
+    r = V({"market": "US", "cost": 50.0, "stop": 40.0}, 60.0, rank=(400, 600, 70))
+    assert r["tag"].startswith("🟠") and any("하위 50%" in f for f in r["flags"]), r
+
+    # 깊은 손실 → 🟠 재평가 (청산 아님)
+    r = V({"market": "KR", "cost": 100.0, "stop": 40.0}, 55.0)  # -45%
+    assert r["tag"].startswith("🟠") and any("재평가" in f for f in r["flags"]), r
+
+    # 계획된 추가 도래 → adds에 🔵, 태그는 유지(추가는 별개 축)
+    r = V({"market": "US", "cost": 50.0, "stop": 45.0,
+           "planned_add": {"date": "2026-07-25", "note": "2차 트랜치"}}, 52.0)
+    assert r["tag"].startswith("🟢") and any("계획된 추가" in a for a in r["adds"]), r
+
+    # 깨끗 → 🟢
+    r = V({"market": "US", "cost": 50.0, "stop": 45.0}, 52.0)
+    assert r["tag"].startswith("🟢") and not r["flags"], r
+
+    # 가격 없음 → ⚪
+    r = V({"market": "US", "cost": 50.0, "stop": 45.0}, None)
+    assert r["tag"].startswith("⚪"), r
+    print("  review verdict: stop/none-stop/distress/rank/loss/add/clean/noprice OK")
+
+
 def test_score_regex_formats() -> None:
     import track
 
@@ -271,6 +320,7 @@ def main() -> int:
     test_tranche_merge()
     test_upcoming_events()
     test_seed_cohort_survives_decision()
+    test_review_verdict()
     test_edgar_filter()
     test_weekly_cohort_lines()
     test_score_regex_formats()
