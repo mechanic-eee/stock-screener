@@ -205,7 +205,95 @@ def test_review_verdict() -> None:
     # 가격 없음 → ⚪
     r = V({"market": "US", "cost": 50.0, "stop": 45.0}, None)
     assert r["tag"].startswith("⚪"), r
-    print("  review verdict: stop/none-stop/distress/rank/loss/add/clean/noprice OK")
+
+    # EDGAR 🔴 신규공시 → 🔴 청산검토 (손절 여유 충분해도)
+    r = V({"market": "US", "cost": 50.0, "stop": 40.0}, 60.0, edgar=[("🔴", "424B5", dt.date(2026, 7, 20))])
+    assert r["tag"].startswith("🔴") and any("424B5" in f for f in r["flags"]), r
+    # EDGAR 🟠 8-K → 🟠
+    r = V({"market": "US", "cost": 50.0, "stop": 40.0}, 60.0, edgar=[("🟠", "8-K", dt.date(2026, 7, 20))])
+    assert r["tag"].startswith("🟠") and any("8-K" in f for f in r["flags"]), r
+    # EDGAR 빈 리스트(점검했으나 신규 없음) → EDGAR 플래그 없음
+    r = V({"market": "US", "cost": 50.0, "stop": 45.0}, 52.0, edgar=[])
+    assert r["tag"].startswith("🟢") and not any("EDGAR" in f for f in r["flags"]), r
+
+    # stop=0 → 미설정으로 정규화(🟠 손절선 미설정), price<=0 오판 없음
+    r = V({"market": "US", "cost": 50.0, "stop": 0}, 60.0)
+    assert r["tag"].startswith("🟠") and any("손절선 미설정" in f for f in r["flags"]), r
+
+    # 랭킹 유니버스 밖(None) → 강등 아님 (ETF 오탐 방지)
+    r = V({"market": "US", "cost": 50.0, "stop": 45.0}, 52.0, rank=(None, 600, None))
+    assert r["tag"].startswith("🟢") and not any("강등" in f for f in r["flags"]), r
+    # 랭킹 상위권 → 강등 아님
+    r = V({"market": "US", "cost": 50.0, "stop": 45.0}, 52.0, rank=(10, 600, 90))
+    assert r["tag"].startswith("🟢"), r
+
+    # 계획된 추가: 창밖(D+20) → adds 없음
+    r = V({"market": "US", "cost": 50, "stop": 45, "planned_add": {"date": "2026-08-11", "note": "x"}}, 52.0)
+    assert not r["adds"], r
+    # 계획된 추가: '지남'(D-2)
+    r = V({"market": "US", "cost": 50, "stop": 45, "planned_add": {"date": "2026-07-20", "note": "x"}}, 52.0)
+    assert any("지남" in a for a in r["adds"]), r
+    # 잘못된 날짜 형식 → 크래시 없이 ⚠️ 플래그로 표면화
+    r = V({"market": "US", "cost": 50, "stop": 45, "planned_add": {"date": "2026.08.10", "note": "x"}}, 52.0)
+    assert any("planned_add 날짜 형식 오류" in f for f in r["flags"]), r
+    # planned_add가 객체 아닌 문자열 → 크래시 없이 무시
+    r = V({"market": "US", "cost": 50, "stop": 45, "planned_add": "2026-08-10"}, 52.0)
+    assert r["tag"].startswith("🟢") and not r["adds"], r
+    # ★ 물타기 방지: 🔴(손절이탈) 있으면 계획된 추가 억제 → adds 없음, soft에 '보류'
+    r = V({"market": "US", "cost": 50, "stop": 45, "planned_add": {"date": "2026-07-25", "note": "2차"}}, 44.0)
+    assert r["tag"].startswith("🔴") and not r["adds"] and any("보류" in s for s in r["soft"]), r
+
+    print("  review verdict: stop0/edgar/rank-none/rank-top/add-window/add-suppress-on-red/malformed OK")
+
+
+def test_review_theme_concentration() -> None:
+    import review
+
+    rows = [
+        {"h": {"theme": "NAND"}, "value_usd": 60},
+        {"h": {"theme": "leverage"}, "value_usd": 30},
+        {"h": {"theme": "pharma"}, "value_usd": 10},
+        {"h": {"theme": "NAND"}, "value_usd": None},   # 값 없음 → 스킵
+    ]
+    themes = {"NAND": {"comfort_max_pct": 40, "label": "낸드"}, "leverage": {"comfort_max_pct": 15}}
+    out = review._theme_concentration(rows, themes)
+    assert out[0][0] is True and "낸드: 60%" in out[0][1] and "초과" in out[0][1], out  # 내림차순·초과
+    labels = [line for _, line in out]
+    assert any("leverage: 30%" in l and "초과" in l for l in labels), out
+    assert any("pharma: 10%" in l and "초과" not in l for l in labels), out  # cap 없으면 초과 아님
+    assert review._theme_concentration([{"h": {"theme": "x"}, "value_usd": None}], {}) == []  # tot 0 → []
+    print("  review theme_concentration: pct/cap/skip-None/sort/empty OK")
+
+
+def test_review_rank_map() -> None:
+    """_rank_map: 점수 키('점수')·유니버스 제외(ETF)·유니버스 밖 None·3-튜플 arity 고정."""
+    import sys as _sys
+    import types
+
+    import review
+    fake = types.ModuleType("recommend")
+    fake.twl = types.SimpleNamespace(DEFAULT_SNAPSHOT="x")
+    rows = [
+        {"ticker": "AAA", "market": "US", "_security_type": "common", "점수": 90},
+        {"ticker": "BBB", "market": "US", "_security_type": "common", "점수": 70},
+        {"ticker": "ETF", "market": "US", "_security_type": "etf", "점수": 80},
+    ]
+    fake._load_rows = lambda *a, **k: (rows, {})
+    old = _sys.modules.get("recommend")
+    _sys.modules["recommend"] = fake
+    try:
+        m = review._rank_map([{"ticker": "AAA", "market": "US"}, {"ticker": "BBB", "market": "US"},
+                              {"ticker": "ZZZ", "market": "US"}, {"ticker": "ETF", "market": "US"}])
+    finally:
+        if old is not None:
+            _sys.modules["recommend"] = old
+        else:
+            _sys.modules.pop("recommend", None)
+    assert m["AAA"] == (1, 2, 90), m       # rank1/2 (ETF 제외), 점수 키로 조회
+    assert m["BBB"] == (2, 2, 70), m
+    assert m["ZZZ"] == (None, 2, None), m  # 유니버스 밖
+    assert m["ETF"] == (None, 2, None), m  # etf는 랭킹 리스트에서 제외
+    print("  review rank_map: 점수-key + universe-exclusion + None + 3-tuple OK")
 
 
 def test_score_regex_formats() -> None:
@@ -321,6 +409,8 @@ def main() -> int:
     test_upcoming_events()
     test_seed_cohort_survives_decision()
     test_review_verdict()
+    test_review_theme_concentration()
+    test_review_rank_map()
     test_edgar_filter()
     test_weekly_cohort_lines()
     test_score_regex_formats()

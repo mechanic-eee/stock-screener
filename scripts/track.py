@@ -163,9 +163,11 @@ def _merge_tranches(rows: list[dict]) -> dict:
     return base
 
 
-def _current_price(market: str, ticker: str):
+def _current_price(market: str, ticker: str, max_age_days: float = 1.0):
+    # max_age_days: 고정 08:10 스케줄 + 캐시히트가 fetched_at을 갱신하지 않아 격일로
+    # 하루 묵은 가격을 재사용하던 갭(감사 finding 11) — review는 <1.0으로 재조회 강제.
     from screener.data import prices as prices_mod
-    df = prices_mod.get_prices(market, ticker, years=1, max_age_days=1.0)
+    df = prices_mod.get_prices(market, ticker, years=1, max_age_days=max_age_days)
     if df is None or df.empty:
         return None
     return float(df["close"].iloc[-1])

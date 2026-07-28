@@ -80,7 +80,7 @@ if rows:
           f"점수 {rows2[0]['점수'] if rows2 else 'no row'}")
 
 # 4) the loop scripts import cleanly (decide/monitor/track + key backtests)
-for mod in ("decide", "monitor", "track", "position_size"):
+for mod in ("decide", "monitor", "track", "position_size", "review"):
     try:
         __import__(mod)
         check(f"스크립트 import: {mod}", True)
