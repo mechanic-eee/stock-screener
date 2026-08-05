@@ -315,16 +315,23 @@ def test_upcoming_events() -> None:
     import monitor
     import track
 
+    # 날짜는 오늘 기준 상대값 — 고정 날짜(예전 "7/29")는 그날이 지나면 과거 이벤트로
+    # 걸러져 테스트가 부패한다(2026-08-05 실제 발생: 파이프가 exit code까지 삼켜 red push).
+    from datetime import date, timedelta
+    cat = date.today() + timedelta(days=20)
+    tr2 = date.today() + timedelta(days=35)
+    rev120 = (date.today() + timedelta(days=120)).isoformat()
+
     tmp = Path(tempfile.mkdtemp())
     wl = tmp / "WATCHLIST.md"
     wl.write_text("\n".join([
         "| 종목 (티커) | 한줄 논거 | 진입 | 손절선 | 촉매/이벤트 (날짜) | 상태 | 갱신일 |",
         "|---|---|---|---|---|---|---|",
-        "| Boston Scientific (BSX) | x | $43.04 | $39.16 | 2Q 실적 (7/29 확정) | 보유(페이퍼) | 2026-07-18 |",
-        "| NerdWallet (NRDS) | x | $9.53 | — | 2Q 실적 (8/6 확정) | 제외 | 2026-07-18 |",
+        f"| Boston Scientific (BSX) | x | $43.04 | $39.16 | 2Q 실적 ({cat.month}/{cat.day} 확정) | 보유(페이퍼) | 2026-07-18 |",
+        f"| NerdWallet (NRDS) | x | $9.53 | — | 2Q 실적 ({cat.month}/{cat.day} 확정) | 제외 | 2026-07-18 |",
     ]), encoding="utf-8")
     dc = tmp / "DECISIONS.md"
-    dc.write_text("- [2026-07-18] 2차 트랜치 결정 8/10(월), 120d 리뷰 2026-11-16.",
+    dc.write_text(f"- [2026-07-18] 2차 트랜치 결정 {tr2.month}/{tr2.day}(월), 120d 리뷰 {rev120}.",
                   encoding="utf-8")
 
     old_wl, old_dc = track.WATCHLIST, track.DECISIONS
