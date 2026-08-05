@@ -209,7 +209,9 @@ def _run(holdings, themes, fx, today, args) -> None:
             price = track._current_price(mkt, tkr, max_age_days=0.5)  # 08:10 재조회 보장(finding 11)
             distress = None if args.no_distress else monitor._distress(mkt, tkr)
             edgar_new = None
-            if mkt == "US" and not args.no_edgar:
+            # ETN/ETP 티커는 CIK가 발행 은행으로 매핑돼(예: GDXU→Bank of Montreal)
+            # 은행의 일상 424B2 홍수가 전부 🔴로 유입된다 — holdings의 "edgar": false로 차단.
+            if mkt == "US" and not args.no_edgar and h.get("edgar", True):
                 got = monitor._edgar_filings(tkr)
                 if got is not None:
                     forms, dates, accs = got
