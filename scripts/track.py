@@ -294,10 +294,17 @@ def main() -> int:
     today = date.today()
     rows = []
     for it in items:
-        # 닫힌 에피소드는 청산가에 동결(네트워크 조회도 생략) — 산 역사는 변하지 않는다
-        cur = it.get("exit_price") or _current_price(it["market"], it["ticker"])
+        # 닫힌 에피소드는 청산가에 동결(네트워크 조회 금지) — 산 역사는 변하지 않는다.
+        # `or` 폴백 금지: 청산가 0(전액손실)도 유효한 동결값이고(감사 F3), 파싱 실패
+        # (exit_price None)면 라이브 재계산 대신 '가격없음'으로 표면화한다(감사 F9).
+        closed = "청산" in (it.get("status") or "")
+        if closed:
+            cur = it.get("exit_price")
+        else:
+            cur = _current_price(it["market"], it["ticker"])
         ret = ((cur - it["ref_price"]) / it["ref_price"] * 100.0) if cur else None
-        days = (today - it["date"]).days if it["date"] else None
+        # 닫힌 행은 보유일도 동결('—') — 가격만 얼리고 기간은 늙는 부분 동결 방지(감사 F4)
+        days = None if closed else ((today - it["date"]).days if it["date"] else None)
         vs_stop = ((cur - it["stop"]) / cur * 100.0) if (cur and it["stop"]) else None
         rows.append({**it, "current": cur, "ret": ret, "days": days, "vs_stop": vs_stop})
 

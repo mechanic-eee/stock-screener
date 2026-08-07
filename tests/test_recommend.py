@@ -267,7 +267,14 @@ def test_review_watch_verdict() -> None:
     assert "형식 오류" in W({"ticker": "X", "type": "date", "date": "8/18"}, None, today)
     # 미상 type → 표면화
     assert "미상" in W({"ticker": "X", "type": "pricebelow"}, 1.0, today)
-    print("  watch verdict: above/below/date/dday/malformed OK")
+    # level 결측/비숫자 → 블라인드 방지 표면화 (감사 F8)
+    assert "미설정" in W({"ticker": "X", "type": "price_above"}, 50.0, today)
+    assert "형식 오류" in W({"ticker": "X", "type": "price_above", "level": "사만칠천"}, 50.0, today)
+    # 문자열이라도 숫자로 강제 가능하면 정상 판정
+    assert W({"ticker": "X", "type": "price_above", "level": "47.06"}, 47.10, today)
+    # dict 아닌 항목 → 크래시 없이 표면화 (감사 F2)
+    assert "형식 오류" in W("NVO>47", None, today)
+    print("  watch verdict: above/below/date/dday/malformed/level-guard OK")
 
 
 def test_track_exit_price_freeze() -> None:
@@ -286,7 +293,14 @@ def test_track_exit_price_freeze() -> None:
     by = {r["ticker"]: r for r in track._records_from(p, "decision")}
     assert by["NVO"]["exit_price"] == 45.22, by["NVO"]     # 청산가 파싱("45.22 (-10.1%)" → 45.22)
     assert by["MNSO"]["exit_price"] is None, by["MNSO"]    # 열린 포지션은 동결 없음
-    print("  exit-price freeze: closed row parses exit, open row None OK")
+
+    # 전액손실 청산 "0 (-100%)" → exit_price 0.0 (falsy지만 유효한 동결값 — 감사 F3)
+    md0 = md.replace("| 청산 | 45.22 (-10.1%) |", "| 청산 | 0 (-100%) |")
+    p0 = Path(tempfile.mkdtemp()) / "DECISIONS.md"
+    p0.write_text(md0, encoding="utf-8")
+    by0 = {r["ticker"]: r for r in track._records_from(p0, "decision")}
+    assert by0["NVO"]["exit_price"] == 0.0, by0["NVO"]
+    print("  exit-price freeze: closed row parses exit(+zero), open row None OK")
 
 
 def test_review_theme_concentration() -> None:

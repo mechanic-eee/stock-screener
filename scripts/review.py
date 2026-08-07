@@ -148,15 +148,24 @@ def _watch_verdict(w: dict, price, today: dt.date):
     재탈환, 브이티 8/12 재상정 등 — 사람 기억에만 존재)의 자동화. 반환:
     None(미발동) / 문자열(발동 메시지 — 항목을 watch에서 지울 때까지 매일 표시).
     type: price_above | price_below | date."""
+    if not isinstance(w, dict):
+        return f"⚠️ 워치 항목 형식 오류({w!r}) — 확인"
     t = w.get("type")
     label = w.get("note") or w.get("ticker", "?")
-    if t == "price_above":
-        if price is not None and w.get("level") is not None and price >= w["level"]:
-            return f"🔔 {w.get('ticker')} {price:,.2f} ≥ {w['level']:,.2f} 도달 — {label}"
-        return None
-    if t == "price_below":
-        if price is not None and w.get("level") is not None and price <= w["level"]:
-            return f"🔔 {w.get('ticker')} {price:,.2f} ≤ {w['level']:,.2f} 도달 — {label}"
+    if t in ("price_above", "price_below"):
+        # level 검증 — 결측·비숫자면 무장된 듯 보이나 영구 미발동(블라인드)이므로 표면화(감사 F8)
+        if w.get("level") is None:
+            return f"⚠️ 워치 level 미설정({w.get('ticker','?')}) — 확인"
+        try:
+            lvl = float(w["level"])
+        except (TypeError, ValueError):
+            return f"⚠️ 워치 level 형식 오류({w.get('ticker','?')}: {w.get('level')!r}) — 확인"
+        if price is None:
+            return None  # 조회 실패 표면화는 _run이 담당(미도달과 구분)
+        if t == "price_above" and price >= lvl:
+            return f"🔔 {w.get('ticker')} {price:,.2f} ≥ {lvl:,.2f} 도달 — {label}"
+        if t == "price_below" and price <= lvl:
+            return f"🔔 {w.get('ticker')} {price:,.2f} ≤ {lvl:,.2f} 도달 — {label}"
         return None
     if t == "date":
         try:
@@ -287,18 +296,26 @@ def _run(holdings, themes, fx, today, args, watch=None) -> None:
     price_by_tkr = {r["h"]["ticker"]: r["price"] for r in rows}
     hits: list[str] = []
     for w in watch:
-        px = None
-        if w.get("type") in ("price_above", "price_below"):
-            tkr = w.get("ticker")
-            px = price_by_tkr.get(tkr)
-            if px is None and tkr:
-                try:
-                    px = track._current_price(w.get("market", "US"), tkr, max_age_days=0.5)
-                except Exception:  # noqa: BLE001
-                    px = None
-        msg = _watch_verdict(w, px, today)
-        if msg:
-            hits.append(msg)
+        try:  # 항목별 격리 — 손상 워치 1건이 요약·하트비트를 죽이지 않게(감사 F2/F7)
+            px = None
+            fetch_failed = False
+            if isinstance(w, dict) and w.get("type") in ("price_above", "price_below"):
+                tkr = w.get("ticker")
+                px = price_by_tkr.get(tkr)
+                if px is None and tkr:
+                    try:
+                        px = track._current_price(w.get("market", "US"), tkr, max_age_days=0.5)
+                    except Exception:  # noqa: BLE001
+                        px = None
+                    fetch_failed = px is None
+            msg = _watch_verdict(w, px, today)
+            if msg:
+                hits.append(msg)
+            elif fetch_failed:
+                # 미도달이 아니라 '판정 불능' — 무장된 듯 보이는 블라인드 상태 표면화(감사 F8)
+                hits.append(f"⚪ 워치 가격조회 실패({w.get('ticker','?')}) — 판정 불능")
+        except Exception as e:  # noqa: BLE001
+            hits.append(f"⚠️ 워치 처리 오류({(w or {}).get('ticker','?') if isinstance(w, dict) else '?'}: {e})")
     if hits:
         print("\n🔔 워치 조건 도달:")
         for m in hits:
