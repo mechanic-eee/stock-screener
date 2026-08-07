@@ -141,6 +141,35 @@ def _verdict(h: dict, price, rank, distress, edgar_new, today: dt.date,
             "ret": ret, "vs_stop": vs_stop}
 
 
+def _watch_verdict(w: dict, price, today: dt.date):
+    """(순수 함수 — 테스트 대상) 워치 항목 1건 판정.
+
+    상방 트리거·재상정일은 손절과 달리 아무 코드도 감시하지 않던 갭(NVO $47.06
+    재탈환, 브이티 8/12 재상정 등 — 사람 기억에만 존재)의 자동화. 반환:
+    None(미발동) / 문자열(발동 메시지 — 항목을 watch에서 지울 때까지 매일 표시).
+    type: price_above | price_below | date."""
+    t = w.get("type")
+    label = w.get("note") or w.get("ticker", "?")
+    if t == "price_above":
+        if price is not None and w.get("level") is not None and price >= w["level"]:
+            return f"🔔 {w.get('ticker')} {price:,.2f} ≥ {w['level']:,.2f} 도달 — {label}"
+        return None
+    if t == "price_below":
+        if price is not None and w.get("level") is not None and price <= w["level"]:
+            return f"🔔 {w.get('ticker')} {price:,.2f} ≤ {w['level']:,.2f} 도달 — {label}"
+        return None
+    if t == "date":
+        try:
+            d = dt.date.fromisoformat(str(w.get("date")))
+        except (ValueError, TypeError):
+            return f"⚠️ 워치 날짜 형식 오류({w.get('ticker','?')}: {w.get('date')!r}) — 확인"
+        if today >= d:
+            tag = "D-DAY" if today == d else f"D+{(today - d).days}"
+            return f"🗓 {tag} {w.get('ticker','')} — {label}"
+        return None
+    return f"⚠️ 워치 type 미상({t!r}) — 확인"
+
+
 def _rank_map(holdings: list[dict]):
     """보유 종목의 현 스냅샷 enrichment 랭킹 {ticker: (rank|None, n, score|None)}.
     스냅샷 원격 로드 — 실패나 유니버스 밖(ETF·낙폭<50%)이면 (None,n,None). None=전체 미수행."""
@@ -192,8 +221,9 @@ def _theme_concentration(rows: list[dict], themes: dict) -> list[tuple[bool, str
     return out
 
 
-def _run(holdings, themes, fx, today, args) -> None:
+def _run(holdings, themes, fx, today, args, watch=None) -> None:
     """본체 — main()의 try 안에서 호출(예외는 main이 폴백 핑으로 처리)."""
+    watch = watch or []
     ranks = None if args.no_rank else _rank_map(holdings)
     edgar_seen: dict[str, list] = {}
     if not args.no_edgar and _SEEN_PATH.exists():
@@ -252,6 +282,28 @@ def _run(holdings, themes, fx, today, args) -> None:
         for _over, line in tconc:
             print("  · " + line)
 
+    # 워치(재진입 트리거·재상정일) — 보유 아님, 조건 도달 시에만 알림.
+    # 가격은 보유 조회분 재사용, 비보유 티커(예: 청산 후 NVO)는 별도 조회.
+    price_by_tkr = {r["h"]["ticker"]: r["price"] for r in rows}
+    hits: list[str] = []
+    for w in watch:
+        px = None
+        if w.get("type") in ("price_above", "price_below"):
+            tkr = w.get("ticker")
+            px = price_by_tkr.get(tkr)
+            if px is None and tkr:
+                try:
+                    px = track._current_price(w.get("market", "US"), tkr, max_age_days=0.5)
+                except Exception:  # noqa: BLE001
+                    px = None
+        msg = _watch_verdict(w, px, today)
+        if msg:
+            hits.append(msg)
+    if hits:
+        print("\n🔔 워치 조건 도달:")
+        for m in hits:
+            print("  · " + m)
+
     # 텔레그램 요약: 조치 필요(🔴/🟠/⚪) + 계획된 추가 + 테마 초과.
     # system:true(NVO 등)는 monitor가 알림 소유 → 이중 전송 방지 위해 제외(finding 3).
     if args.telegram:
@@ -267,9 +319,12 @@ def _run(holdings, themes, fx, today, args) -> None:
         if adds:
             msg.append("── 계획된 추가 ──")
             msg += adds
+        if hits:
+            msg.append("── 🔔 워치 도달 ──")
+            msg += hits
         if over:
             msg.append("⚠️ 테마 초과: " + " · ".join(over))
-        if not act and not adds and not over:
+        if not act and not adds and not over and not hits:
             msg.append("🟢 개인 보유 규칙 이상 없음 · 조치 불필요")
         print("\n(텔레그램 전송됨)" if _send("\n".join(msg)) else "\n(⚠️ 텔레그램 전송 실패)")
 
@@ -329,7 +384,7 @@ def main() -> int:
 
     print(f"보유 {len(holdings)}종목 규율 점검 — 현재가/위험/랭킹 조회 중...", flush=True)
     try:
-        _run(holdings, themes, fx, today, args)
+        _run(holdings, themes, fx, today, args, watch=data.get("watch", []))
     except Exception as e:  # noqa: BLE001 — 어떤 예외에도 하트비트는 나간다
         msg = f"⚠️ review 실패: {e}"
         print(msg)

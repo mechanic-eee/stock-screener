@@ -102,6 +102,7 @@ def _records_from(path: Path, source: str) -> list[dict]:
         ci_qty = _col(header, "수량")
         ci_date = _col(header, "시드", "갱신", "날짜", exclude="촉매")  # avoid '촉매/이벤트 (날짜)'
         ci_status = _col(header, "상태")
+        ci_exit = _col(header, "청산가")  # DECISIONS "청산가/수익률" — 닫힌 포지션 가격 동결용
         if ci_tkr is None or ci_px is None:
             continue
         for cells in data:
@@ -123,6 +124,11 @@ def _records_from(path: Path, source: str) -> list[dict]:
                 continue
             sc = _SCORE.search(" ".join(cells))
             status = cells[ci_status] if ci_status is not None and ci_status < len(cells) else ""
+            # 청산 행은 청산가에 동결 — 예전엔 닫힌 포지션도 현재가로 재계산되어
+            # 기록된 수익률(-10.1%)과 표시(-8.6%)가 어긋났다(2026-08-07 관찰).
+            exit_px = None
+            if "청산" in status and ci_exit is not None and ci_exit < len(cells):
+                exit_px = _num(cells[ci_exit].split("(")[0])  # "45.22 (-10.1%)" → 45.22
             out.append({
                 "ticker": ticker,
                 "market": "KR" if ticker.isdigit() and len(ticker) == 6 else "US",
@@ -135,6 +141,7 @@ def _records_from(path: Path, source: str) -> list[dict]:
                 "veto": bool(re.search(r"베토|랭크컷", " ".join(cells))),
                 "score": float(sc.group(1) or sc.group(2) or sc.group(3)) if sc else None,
                 "source": source,
+                "exit_price": exit_px,
             })
     return out
 
@@ -287,7 +294,8 @@ def main() -> int:
     today = date.today()
     rows = []
     for it in items:
-        cur = _current_price(it["market"], it["ticker"])
+        # 닫힌 에피소드는 청산가에 동결(네트워크 조회도 생략) — 산 역사는 변하지 않는다
+        cur = it.get("exit_price") or _current_price(it["market"], it["ticker"])
         ret = ((cur - it["ref_price"]) / it["ref_price"] * 100.0) if cur else None
         days = (today - it["date"]).days if it["date"] else None
         vs_stop = ((cur - it["stop"]) / cur * 100.0) if (cur and it["stop"]) else None

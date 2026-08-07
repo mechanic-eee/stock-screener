@@ -246,6 +246,49 @@ def test_review_verdict() -> None:
     print("  review verdict: stop0/edgar/rank-none/rank-top/add-window/add-suppress-on-red/malformed OK")
 
 
+def test_review_watch_verdict() -> None:
+    """워치(재진입 트리거·재상정일): 상방/하방/날짜/오류 전 분기."""
+    import datetime as dt
+
+    import review
+    today = dt.date(2026, 8, 8)
+    W = review._watch_verdict
+
+    # price_above: 도달/미달/가격없음
+    assert W({"ticker": "NVO", "type": "price_above", "level": 47.06, "note": "재진입"}, 47.10, today)
+    assert W({"ticker": "NVO", "type": "price_above", "level": 47.06}, 46.99, today) is None
+    assert W({"ticker": "NVO", "type": "price_above", "level": 47.06}, None, today) is None
+    # price_below 도달
+    assert W({"ticker": "X", "type": "price_below", "level": 10.0}, 9.5, today)
+    # date: D-DAY / D+n / 미도래 / 형식오류
+    assert "D-DAY" in W({"ticker": "215200", "type": "date", "date": "2026-08-08", "note": "실적"}, None, today)
+    assert "D+2" in W({"ticker": "215200", "type": "date", "date": "2026-08-06", "note": "실적"}, None, today)
+    assert W({"ticker": "010780", "type": "date", "date": "2026-08-18"}, None, today) is None
+    assert "형식 오류" in W({"ticker": "X", "type": "date", "date": "8/18"}, None, today)
+    # 미상 type → 표면화
+    assert "미상" in W({"ticker": "X", "type": "pricebelow"}, 1.0, today)
+    print("  watch verdict: above/below/date/dday/malformed OK")
+
+
+def test_track_exit_price_freeze() -> None:
+    """청산 행은 청산가에 동결 — 현재가 재계산으로 기록과 어긋나던 버그(8/7 관찰) 회귀가드."""
+    import track
+
+    md = "\n".join([
+        "## 📌 포지션",
+        "| 날짜 | 티커 | 액션 | 진입가 | 손절 | 수량 | 비중 | 논거 | 상태 | 청산가/수익률 |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+        "| 2026-07-20 | NVO | 매수 | 50.28 | 47.06 | 31 | 16% | x (점수 93) | 청산 | 45.22 (-10.1%) |",
+        "| 2026-08-07 | MNSO | 매수 | 12.29 | 11.39 | 111 | 14% | y (점수 84) | 보유(페이퍼) | — |",
+    ])
+    p = Path(tempfile.mkdtemp()) / "DECISIONS.md"
+    p.write_text(md, encoding="utf-8")
+    by = {r["ticker"]: r for r in track._records_from(p, "decision")}
+    assert by["NVO"]["exit_price"] == 45.22, by["NVO"]     # 청산가 파싱("45.22 (-10.1%)" → 45.22)
+    assert by["MNSO"]["exit_price"] is None, by["MNSO"]    # 열린 포지션은 동결 없음
+    print("  exit-price freeze: closed row parses exit, open row None OK")
+
+
 def test_review_theme_concentration() -> None:
     import review
 
@@ -416,6 +459,8 @@ def main() -> int:
     test_upcoming_events()
     test_seed_cohort_survives_decision()
     test_review_verdict()
+    test_review_watch_verdict()
+    test_track_exit_price_freeze()
     test_review_theme_concentration()
     test_review_rank_map()
     test_edgar_filter()
