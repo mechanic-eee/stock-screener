@@ -26,9 +26,13 @@ if ($Unregister) {
 $daily = Join-Path $PSScriptRoot "daily.ps1"
 if (-not (Test-Path $daily)) { Write-Error "daily.ps1 not found: $daily"; exit 1 }
 
-# prefer pwsh, fall back to Windows PowerShell
-$shell = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
-if (-not $shell) { $shell = (Get-Command powershell).Source }
+# prefer STABLE shell paths only. Get-Command pwsh can resolve to a Store
+# versioned path (WindowsApps\Microsoft.PowerShell_<ver>__...) that VANISHES on
+# auto-update — killed this task with 0x80070002 silently for 10 days
+# (2026-07-28 ~ 08-07 postmortem: no morning telegram, incl. a stop-breach alert).
+$shell = "C:\Program Files\PowerShell\7\pwsh.exe"                                # MSI install (stable)
+if (-not (Test-Path $shell)) { $shell = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\pwsh.exe" }  # Store alias (stable across updates)
+if (-not (Test-Path $shell)) { $shell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe" }  # always exists
 
 $action = New-ScheduledTaskAction -Execute $shell -Argument (
     "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$daily`" -Telegram")
