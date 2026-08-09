@@ -303,6 +303,31 @@ def test_track_exit_price_freeze() -> None:
     print("  exit-price freeze: closed row parses exit(+zero), open row None OK")
 
 
+def test_ledger_summary() -> None:
+    """실현손익 원장: 통산·연도필터·KR 분리·공제 경계 양쪽."""
+    import ledger
+
+    trades = [
+        {"date": "2026-07-21", "ticker": "A", "market": "US", "qty": 10, "buy": 10.0, "sell": 15.0},   # +50
+        {"date": "2026-08-01", "ticker": "B", "market": "US", "qty": 10, "buy": 20.0, "sell": 15.0},   # -50
+        {"date": "2025-12-31", "ticker": "C", "market": "US", "qty": 100, "buy": 1.0, "sell": 9.0},    # 작년 — 제외
+        {"date": "2026-08-05", "ticker": "440110", "market": "KR", "qty": 10, "buy": 1000, "sell": 2000},  # KR +1만원
+    ]
+    s = ledger._summary(trades, fx=1000.0, year=2026)
+    assert len(s["rows"]) == 3, s["rows"]                      # 2025 거래 제외
+    assert abs(s["us_total_usd"] - 0.0) < 1e-9, s              # +50-50 통산 0
+    assert s["kr_total_krw"] == 10000, s                       # KR은 분리(비과세)
+    assert s["taxable_krw"] == 0 and s["est_tax_krw"] == 0, s
+    assert s["exemption_left_krw"] == ledger.EXEMPTION_KRW, s  # 통산 0이면 공제 전액 여유
+
+    # 공제 초과 케이스: +$3,000 × 1000원 = 300만 → 과세표준 50만 → 세 11만
+    s2 = ledger._summary([{"date": "2026-01-01", "ticker": "D", "market": "US",
+                           "qty": 100, "buy": 10.0, "sell": 40.0}], fx=1000.0, year=2026)
+    assert s2["taxable_krw"] == 500_000 and abs(s2["est_tax_krw"] - 110_000) < 1e-6, s2
+    assert s2["exemption_left_krw"] < 0, s2
+    print("  ledger: netting/year-filter/KR-split/exemption-both-sides OK")
+
+
 def test_review_theme_concentration() -> None:
     import review
 
@@ -475,6 +500,7 @@ def main() -> int:
     test_review_verdict()
     test_review_watch_verdict()
     test_track_exit_price_freeze()
+    test_ledger_summary()
     test_review_theme_concentration()
     test_review_rank_map()
     test_edgar_filter()
