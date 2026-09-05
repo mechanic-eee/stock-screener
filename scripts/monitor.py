@@ -47,7 +47,14 @@ def _held_positions() -> list[dict]:
         if "보유" in (r.get("status") or ""):
             by[r["ticker"]].append(r)
     out = []
+    groups = []
     for v in by.values():
+        # 페이퍼/실계좌 동일 티커는 별개 포지션(손절 자동 집행은 페이퍼 행만 닫아야 한다)
+        for paper_flag in (True, False):
+            grp = [r for r in v if bool(r.get("paper")) == paper_flag]
+            if grp:
+                groups.append(grp)
+    for v in groups:
         m = track._merge_tranches(v)
         # 손절 유효 시작일 = 가장 최근 트랜치/손절 결정일. 그 전의 종가는 현재 손절과
         # 비교하면 안 된다(2차 트랜치로 손절이 올라간 경우 과거 봉이 '이탈'로 오독됨).
@@ -95,7 +102,7 @@ def _auto_paper_exit(it: dict, mkt: str, tkr: str, stop: float, dry_run: bool = 
         note = (f"[페이퍼 손절 자동집행] {b_d} 종가 {track._fmt(mkt, b_c)} ≤ 손절 {track._fmt(mkt, stop)} 이탈 "
                 f"→ 익일({x_d}) 종가 체결 가정 (monitor 자동)")
         res = decide.close_position(tkr, x_c, note=note, date_str=x_d.isoformat(), src="auto-stop",
-                                    code="손절", dry_run=dry_run)
+                                    code="손절", dry_run=dry_run, only_paper=True)
         if not res:
             return None
         ra = res.get("ret_avg")

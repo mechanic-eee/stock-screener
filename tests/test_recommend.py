@@ -725,12 +725,112 @@ def test_paper_auto_exit_and_close_position():
         rec = json.loads(jl.read_text(encoding="utf-8").strip().splitlines()[-1])
         assert rec["ticker"] == "259630" and rec["verdict"] == "청산" and rec["rows"] == 2 and rec["paper"]
         assert decide.close_position("ZZZ", 1.0) is None
+        # same ticker paper + real: only_paper=True closes the paper row only
+        dec.write_text(dec.read_text(encoding="utf-8").replace(
+            "| 2026-08-11 | NVO | 매수 | 47.59 | 43.10 | 20 | 10% | c | 보유 | — |",
+            "| 2026-08-17 | SIRI | 매수 | 28.46 | 25.93 | 37 | 11% | p | 보유(페이퍼) | — |\n"
+            "| 2026-08-17 | SIRI | 매수 | 28.35 | 25.93 | 37 | 11% | r | 보유 | — |"), encoding="utf-8")
+        res = decide.close_position("SIRI", 25.5, note="auto", date_str="2026-09-10", only_paper=True)
+        assert res and len(res["rows"]) == 1 and res["paper"] is True
+        t2 = dec.read_text(encoding="utf-8")
+        assert "| r | 보유 | — |" in t2 and "| p | 청산(페이퍼) |" in t2
         assert decide._trailer("관망", "tip", 4.57, "ATR", "2026-12-10") == \
             " | verdict=관망 | src=tip | px=4.57 | code=ATR | recheck=2026-12-10"
         assert decide._trailer() == ""
     finally:
         decide.DECISIONS, decide.JSONL = od, oj
     print("  paper auto-exit: breach/exit bars, close all tranches, trailer+jsonl OK")
+
+
+def test_control_cohort_and_verdict_summary():
+    """P1 (2026-09-06): CONTROL.md rows parse as control episodes (never pooled
+    with picks), and the verdict summary separates 채택 vs 대조군 by verdict/source."""
+    import track
+
+    tmp = Path(tempfile.mkdtemp())
+    ctl = tmp / "CONTROL.md"
+    ctl.write_text("\n".join([
+        "# C", "", "## 📋 대조군", "",
+        "| 결정 날짜 | 티커 | 판정 | 출처 | 당시 결정가 | 사유코드 | 재검토 | 상태 | 메모 |",
+        "|---|---|---|---|---|---|---|---|---|",
+        "| 2026-08-14 | GEVO | 관망 | tip | 1.40 | 소멸 | — | 대조군 | x |",
+        "| 2026-07-18 | 260970 | 베토 | funnel | 12,340 | 고객집중 | — | 대조군 | y |",
+        "| 2026-07-18 | OLD | 베토 | funnel | 5.00 | 딜 | — | 종료 | z |", ""]), encoding="utf-8")
+    recs = track._records_from(ctl, "control")
+    assert [r["ticker"] for r in recs] == ["GEVO", "260970", "OLD"]
+    g = recs[0]
+    assert g["control"] and g["verdict"] == "관망" and g["src"] == "tip" and g["ref_price"] == 1.4
+    assert g["date"] == date(2026, 8, 14) and recs[1]["market"] == "KR" and recs[1]["ref_price"] == 12340
+
+    # _collect skips 종료 rows and keeps control episodes apart from picks
+    orig = track.CONTROL
+    track.CONTROL = ctl
+    try:
+        items = track._collect(tmp / "nowl.md", tmp / "nodec.md")
+    finally:
+        track.CONTROL = orig
+    assert sorted(r["ticker"] for r in items) == ["260970", "GEVO"]
+    # paper + real rows of one ticker stay separate positions (never merged)
+    dec2 = tmp / "D2.md"
+    dec2.write_text("\n".join([
+        "## 📌 포지션", "",
+        "| 날짜 | 티커 | 액션 | 진입가 | 손절 | 수량 | 비중% | 논거 (점수) | 상태 | 청산가/수익률 |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+        "| 2026-08-17 | SIRI | 매수 | 28.46 | 25.93 | 37 | 11% | p | 보유(페이퍼) | — |",
+        "| 2026-08-17 | SIRI | 매수 | 28.35 | 25.93 | 37 | 11% | r | 보유 | — |", ""]), encoding="utf-8")
+    track.CONTROL = tmp / "none.md"
+    try:
+        pos = track._collect(tmp / "nowl.md", dec2)
+    finally:
+        track.CONTROL = orig
+    assert sorted((r["ticker"], bool(r.get("paper"))) for r in pos) == [("SIRI", False), ("SIRI", True)]
+
+    valid = [
+        {"date": date(2026, 7, 18), "paper": True, "control": False, "source": "decision", "ret": 8.0,
+         "days": 50, "score": 85, "status": "보유(페이퍼)", "market": "KR"},
+        {"date": date(2026, 7, 18), "paper": True, "control": False, "source": "decision", "ret": -2.0,
+         "days": 50, "score": 84, "status": "보유(페이퍼)", "market": "US"},
+        {"date": date(2026, 7, 18), "paper": False, "control": True, "source": "control", "ret": -20.0,
+         "days": 50, "score": None, "status": "대조군", "market": "US", "verdict": "베토", "src": "funnel"},
+        {"date": date(2026, 8, 14), "paper": False, "control": True, "source": "control", "ret": -40.0,
+         "days": 23, "score": None, "status": "대조군", "market": "US", "verdict": "관망", "src": "tip"},
+    ]
+    lines = track._cohort_summary(valid)
+    assert any("[페이퍼]" in ln and "2종목" in ln for ln in lines)
+    assert any("[대조군]" in ln for ln in lines) and not any("[페이퍼] [대조군]" in ln for ln in lines)
+    vs = track._verdict_summary(valid)
+    assert vs[0].startswith("채택·페이퍼 n=2: 평균 +3.0%")
+    assert any(ln.startswith("대조군·전체 n=2: 평균 -30.0%") for ln in vs)
+    assert any(ln.startswith("대조군·베토·funnel n=1") for ln in vs)
+    assert any("= +33.0%p" in ln for ln in vs)
+    print("  control cohort: parse/collect/summary split OK")
+
+
+def test_compliance_summary():
+    """P1 (2026-09-06): on-time/execution rates exclude waived, late is judged
+    against due (planned + grace), overdue/upcoming lists drive the daily line."""
+    import compliance as c
+
+    evs = [
+        {"id": "a", "action": "x", "planned": "2026-08-10", "status": "done", "executed": "2026-08-10"},
+        {"id": "b", "action": "x", "planned": "2026-08-10", "status": "late", "executed": "2026-08-17"},
+        {"id": "c", "action": "x", "planned": "2026-08-01", "status": "missed"},
+        {"id": "d", "action": "x", "planned": "2026-08-01", "status": "waived"},
+        {"id": "e", "ticker": "NVO", "action": "2차", "planned": "2026-08-25", "due": "2026-09-08", "status": "pending"},
+        {"id": "f", "action": "old", "planned": "2026-09-01", "status": "pending"},          # due 9/3 < today
+    ]
+    today = date(2026, 9, 6)
+    s = c.summarize(evs, today)
+    assert s["denominator"] == 3 and abs(s["on_time_rate"] - 1 / 3) < 1e-9 and abs(s["execution_rate"] - 2 / 3) < 1e-9
+    assert s["avg_late_days"] == 7 and [e["id"] for e in s["overdue"]] == ["f"] and [e["id"] for e in s["upcoming"]] == ["e"]
+    assert c.judge({"planned": "2026-08-10"}, date(2026, 8, 12)) == "done"
+    assert c.judge({"planned": "2026-08-10"}, date(2026, 8, 13)) == "late"
+    assert c.judge({"planned": "2026-08-10", "due": "2026-08-20"}, date(2026, 8, 19)) == "done"
+    od, up = c.alert_lines(today, evs)
+    assert od and od[0].startswith("⏰ 기한 경과 3일") and up and up[0].startswith("📅 D-2: NVO 2차")
+    txt = c.render(evs, today)
+    assert "정시율 33%" in txt and "집행률 67%" in txt
+    print("  compliance: rates/judge/overdue/upcoming OK")
 
 
 def main() -> int:
@@ -755,6 +855,8 @@ def main() -> int:
     test_fund4_gate_shared_and_fundamental_unavailable()
     test_account_heat()
     test_paper_auto_exit_and_close_position()
+    test_control_cohort_and_verdict_summary()
+    test_compliance_summary()
     print("✅ test_recommend: all passed")
     return 0
 

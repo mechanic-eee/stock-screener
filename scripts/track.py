@@ -26,6 +26,7 @@ except Exception:
 
 INVESTING = Path(__file__).resolve().parents[2] / "stock-investing"
 WATCHLIST = INVESTING / "WATCHLIST.md"
+CONTROL = INVESTING / "CONTROL.md"      # 대조군: 채택하지 않은 판정(베토/보류/관망/팁)의 결정가 동결 표
 DECISIONS = INVESTING / "DECISIONS.md"
 
 _TICKER = re.compile(r"\(([A-Za-z0-9.]{1,7})\)")
@@ -103,6 +104,9 @@ def _records_from(path: Path, source: str) -> list[dict]:
         ci_date = _col(header, "시드", "갱신", "날짜", exclude="촉매")  # avoid '촉매/이벤트 (날짜)'
         ci_status = _col(header, "상태")
         ci_exit = _col(header, "청산가")  # DECISIONS "청산가/수익률" — 닫힌 포지션 가격 동결용
+        ci_verdict = _col(header, "판정")   # CONTROL.md 대조군 전용 열
+        ci_src = _col(header, "출처")
+        ci_code = _col(header, "사유")
         if ci_tkr is None or ci_px is None:
             continue
         for cells in data:
@@ -142,6 +146,10 @@ def _records_from(path: Path, source: str) -> list[dict]:
                 "score": float(sc.group(1) or sc.group(2) or sc.group(3)) if sc else None,
                 "source": source,
                 "exit_price": exit_px,
+                "control": source == "control",
+                "verdict": cells[ci_verdict] if ci_verdict is not None and ci_verdict < len(cells) else None,
+                "src": cells[ci_src] if ci_src is not None and ci_src < len(cells) else None,
+                "code": cells[ci_code] if ci_code is not None and ci_code < len(cells) else None,
             })
     return out
 
@@ -286,24 +294,25 @@ def _cohort_summary(valid: list[dict], with_bench: bool = False) -> list[str]:
     cohorts: dict[object, list] = defaultdict(list)
     for r in valid:
         # paper trades aggregate separately: the 8-week paper-first phase must
-        # never blend into the real-money cohort stats (recommendation-design §3)
-        cohorts[(r["date"], bool(r.get("paper")))].append(r)
+        # never blend into the real-money cohort stats (recommendation-design §3).
+        # control rows (대조군) are a third bucket — never pooled with picks.
+        cohorts[(r["date"], bool(r.get("paper")), bool(r.get("control")))].append(r)
     lines = []
-    for d, paper in sorted(cohorts, key=lambda x: (x[0] is None, x[0] or date.min, x[1])):
-        cr = cohorts[(d, paper)]
+    for d, paper, control in sorted(cohorts, key=lambda x: (x[0] is None, x[0] or date.min, x[1], x[2])):
+        cr = cohorts[(d, paper, control)]
         avg = sum(x["ret"] for x in cr) / len(cr)
         win = sum(1 for x in cr if x["ret"] > 0) / len(cr)
         days = next((x["days"] for x in cr if x["days"] is not None), None)
         scores = sorted({round(x["score"]) for x in cr if x["score"] is not None})
         stag = (f" · 점수 {scores[0]}~{scores[-1]}" if len(scores) > 1
                 else (f" · 점수 {scores[0]}" if scores else ""))
-        label = (d.isoformat() if d else "날짜없음") + (" [페이퍼]" if paper else "")
+        label = (d.isoformat() if d else "날짜없음") + (" [페이퍼]" if paper else "") + (" [대조군]" if control else "")
         dd = f"{days}d" if days is not None else "—"
         line = f"{label} ({dd}, {len(cr)}종목{stag}): 평균 {avg:+.1f}%, 승률 {win:.0%}"
         # 베토군 라벨은 '베토/랭크컷' 표기가 실제로 있는 제외 코호트만 — 상태만
         # 보면 5/25 미큐레이션 폐기(base) 코호트가 오탐된다
         statuses = [x.get("status") or "" for x in cr]
-        if (statuses and all("제외" in s for s in statuses)
+        if (not control and statuses and all("제외" in s for s in statuses)
                 and any(x.get("veto") for x in cr)):
             line += " · 베토군(관망 사후추적)"
         if with_bench and d is not None:
@@ -316,6 +325,45 @@ def _cohort_summary(valid: list[dict], with_bench: bool = False) -> list[str]:
             if bts:
                 line += " (vs " + " · ".join(bts) + ")"
         lines.append(line)
+    return lines
+
+
+def _verdict_summary(valid: list[dict]) -> list[str]:
+    """판정별 사후 성과 — 사람·에이전트 레이어의 반증 데이터(P1, 2026-09-06).
+
+    채택(페이퍼/실계좌)은 DECISIONS 포지션(열린 것은 현재가, 닫힌 것은 청산가 동결),
+    대조군은 CONTROL.md 행(결정가 대비 현재가). 보유기간이 섞이므로 방향과 순서만 읽는다
+    — n<20 구간에서 규칙을 바꾸는 근거로 쓰지 않는다(설계 §3)."""
+    from collections import defaultdict
+    from statistics import median
+
+    groups: dict[str, list[float]] = defaultdict(list)
+    for r in valid:
+        if r.get("control"):
+            v = (r.get("verdict") or "판정").strip()
+            src = (r.get("src") or "?").strip()
+            groups[f"대조군·{v}·{src}"].append(r["ret"])
+            groups["대조군·전체"].append(r["ret"])
+        elif str(r.get("source", "")).startswith("decision"):
+            groups["채택·페이퍼" if r.get("paper") else "채택·실계좌"].append(r["ret"])
+        elif r.get("veto") and "제외" in (r.get("status") or ""):
+            groups["베토군(7/18 큐레이션)"].append(r["ret"])
+    if not groups:
+        return []
+    order = ["채택·페이퍼", "채택·실계좌", "대조군·전체"]
+    keys = order[:] + sorted(k for k in groups if k not in order)
+    lines = []
+    for k in keys:
+        rs = groups.get(k)
+        if not rs:
+            continue
+        avg = sum(rs) / len(rs)
+        win = sum(1 for x in rs if x > 0) / len(rs)
+        lines.append(f"{k} n={len(rs)}: 평균 {avg:+.1f}% · 중앙 {median(rs):+.1f}% · 승률 {win:.0%}")
+    pk, ct = groups.get("채택·페이퍼"), groups.get("대조군·전체")
+    if pk and ct:
+        gap = sum(pk) / len(pk) - sum(ct) / len(ct)
+        lines.append(f"→ 채택(페이퍼) − 대조군 = {gap:+.1f}%p (양수면 사람·에이전트 레이어가 값을 더한 방향; 기간 혼재)")
     return lines
 
 
@@ -344,11 +392,20 @@ def _collect(watchlist: Path, decisions: Path) -> list[dict]:
         if wl is not None and wl.get("date") in ddates:
             recs.pop(tkr, None)  # same-cycle seed row — decision supersedes it
         held = [r for r in drows if "보유" in (r.get("status") or "")]
-        if held:
-            recs[(tkr, "position")] = _merge_tranches(held)
+        # 페이퍼와 실계좌가 같은 티커(SIRI 8/17)면 별개 포지션 — 합치면 실계좌 성과가 페이퍼로
+        # 분류되고 페이퍼 자동 손절이 실계좌 행까지 닫는다(2026-09-06 발견).
+        for paper_flag in (True, False):
+            grp = [r for r in held if bool(r.get("paper")) == paper_flag]
+            if grp:
+                recs[(tkr, "position", paper_flag)] = _merge_tranches(grp)
         for r in drows:
             if r not in held:
                 recs[(tkr, r.get("date"), r.get("status"))] = r
+    # 대조군: 판정 1건 = 에피소드 1개(같은 티커의 재상정도 별도 행) — 채택군과 절대 합치지 않는다
+    for r in _records_from(CONTROL, "control"):
+        if "종료" in (r.get("status") or ""):
+            continue
+        recs[(r["ticker"], r.get("date"), "control", r.get("verdict"))] = r
     return list(recs.values())
 
 
@@ -400,6 +457,11 @@ def main() -> int:
         for ln in cohort_lines:
             print("  " + ln)
         print(f"  전체 {len(valid)}종목 평균 {avg:+.1f}% (보유기간 혼재 — 참고용)")
+    verdict_lines = _verdict_summary(valid)
+    if verdict_lines:
+        print("\n판정별 사후 성과 (채택 vs 대조군 — 방향만, n<20이면 규칙 근거 아님):")
+        for ln in verdict_lines:
+            print("  " + ln)
 
     if not args.dry_run:
         out = [f"# TRACKING — 시드/포지션 사후 추적", "",
@@ -410,6 +472,10 @@ def main() -> int:
             out.append("**코호트별** (시드일 기준 — 보유기간 다르면 비교는 시간 필요):")
             out += [f"- {ln}" for ln in cohort_lines]
             out.append(f"- 전체 {len(valid)}종목 평균 {avg:+.1f}% _(보유기간 혼재, 참고용)_")
+            out.append("")
+        if verdict_lines:
+            out.append("**판정별 사후 성과** (채택 vs 대조군 `CONTROL.md` — 사람·에이전트 레이어의 반증 데이터; 기간 혼재라 방향만):")
+            out += [f"- {ln}" for ln in verdict_lines]
             out.append("")
         out += [
                "| 티커 | 시장 | 기준가 | 현재가 | 수익률 | 손절여유 | 보유일 | 점수 | 상태 | 소스 |",

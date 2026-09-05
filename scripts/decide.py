@@ -43,6 +43,7 @@ INVEST = ROOT.parent / "stock-investing"                   # sibling project
 WATCHLIST = INVEST / "WATCHLIST.md"
 DECISIONS = INVEST / "DECISIONS.md"
 JSONL = INVEST / "decisions.jsonl"      # 기계가독 병기 원장 (append-only)
+CONTROL = INVEST / "CONTROL.md"         # 대조군: 채택 안 한 판정의 결정가 동결(track.py가 추적)
 
 _BUY_ACTIONS = {"매수", "추가매수"}
 VERDICTS = ("베토", "보류", "관망", "랭크컷", "이연", "채택안함", "채택", "청산", "매수", "추가매수")
@@ -152,12 +153,42 @@ def _insert_log_bullet(lines: list[str], bullet: str) -> bool:
     return False
 
 
+def _append_control_row(date_str: str, ticker: str, verdict: str, src: str | None, px,
+                        code: str | None, recheck: str | None, note: str = "") -> bool:
+    """CONTROL.md 대조군 표에 행 추가. px가 없으면 현재가를 조회해 채운다(그래도 없으면 '—',
+    track가 건너뜀). 베토/보류/관망/랭크컷/이연만 — 채택은 포지션 표가 진실."""
+    if verdict not in ("베토", "보류", "관망", "랭크컷", "이연", "채택안함"):
+        return False
+    if px is None:
+        try:
+            import track
+            px = track._current_price(_market_of(ticker), ticker)
+        except Exception:  # noqa: BLE001
+            px = None
+    mkt = _market_of(ticker)
+    pcell = ("—" if px is None else (f"{px:,.0f}" if mkt == "KR" else f"{px:,.2f}"))
+    memo = (note or "").replace("|", "/").strip()
+    memo = memo[:60] + ("…" if len(memo) > 60 else "")
+    row = (f"| {date_str} | {ticker} | {verdict} | {src or '—'} | {pcell} | {code or '—'} | "
+           f"{recheck or '—'} | 대조군 | {memo} |")
+    if not CONTROL.exists():
+        return False
+    lines = CONTROL.read_text(encoding="utf-8").splitlines()
+    if not _insert_after_table(lines, "📋 대조군", row):
+        return False
+    CONTROL.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"📋 CONTROL.md 대조군 행 추가: {ticker} {verdict} @ {pcell}")
+    return True
+
+
 def close_position(ticker: str, exit_px: float, note: str = "", date_str: str | None = None,
-                   dry_run: bool = False, src: str = "manual", code: str | None = None) -> dict | None:
+                   dry_run: bool = False, src: str = "manual", code: str | None = None,
+                   only_paper: bool | None = None) -> dict | None:
     """포지션 표의 `ticker` 보유행 **전부**(트랜치 포함)를 청산으로 바꾸고 결정 로그+jsonl에 남긴다.
 
     반환 {"ticker","exit","rows":[{"entry","ret","paper"}],"ret_avg","paper","bullet"} 또는
-    None(보유행 없음). 예전 구현은 첫 행만 닫아 2차 트랜치가 '보유'로 남는 구멍이 있었다."""
+    None(보유행 없음). 예전 구현은 첫 행만 닫아 2차 트랜치가 '보유'로 남는 구멍이 있었다.
+    only_paper=True/False면 그 종류의 행만 닫는다(None=전부)."""
     date_str = date_str or date.today().isoformat()
     mkt = _market_of(ticker)
     ecell = lambda v: f"{v:,.0f}" if mkt == "KR" else f"{v:,.2f}"  # noqa: E731
@@ -169,9 +200,11 @@ def close_position(ticker: str, exit_px: float, note: str = "", date_str: str | 
         c = [x.strip() for x in ln.strip().strip("|").split("|")]
         if len(c) < 10 or c[1] != ticker or "보유" not in c[8] or c[0].startswith("_"):
             continue
+        paper = "페이퍼" in c[8]
+        if only_paper is not None and paper != only_paper:
+            continue  # 페이퍼 자동 손절이 같은 티커의 실계좌 행을 닫지 않게(SIRI 8/17)
         entry = _parse_price(c[3])
         ret = ((exit_px - entry) / entry * 100.0) if entry else None
-        paper = "페이퍼" in c[8]
         c[8] = "청산(페이퍼)" if paper else "청산"
         c[9] = f"{ecell(exit_px)} ({ret:+.1f}%)" if ret is not None else ecell(exit_px)
         lines[i] = "| " + " | ".join(c) + " |"
@@ -260,6 +293,8 @@ def main() -> int:
         _append_jsonl({"date": args.date, "ticker": args.ticker, "market": mkt, "action": "판정",
                        "verdict": args.verdict, "src": args.src, "px": args.px, "code": args.code,
                        "recheck": args.recheck, "note": args.note})
+        _append_control_row(args.date, args.ticker, args.verdict, args.src, args.px, args.code,
+                            args.recheck, args.note)
         print("✅ DECISIONS.md 결정 로그 + decisions.jsonl 기록")
         return 0
 
@@ -293,6 +328,8 @@ def main() -> int:
         _append_jsonl({"date": args.date, "ticker": args.ticker, "market": market, "action": args.action,
                        "verdict": args.verdict or args.action, "src": args.src or "funnel", "px": px,
                        "code": args.code, "recheck": args.recheck, "score": score, "note": args.note})
+        _append_control_row(args.date, args.ticker, args.verdict or args.action, args.src or "funnel", px,
+                            args.code, args.recheck, args.note)
         print("✅ DECISIONS.md 결정 로그 + decisions.jsonl 기록")
         return 0
 

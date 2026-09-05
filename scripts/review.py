@@ -403,6 +403,19 @@ def _run(holdings, themes, fx, today, args, watch=None) -> "bool | None":
         _cfg = {}
     hstate, hline = _account_heat(rows, fx, _cfg.get("cash_krw", 0), _cfg.get("cash_usd", 0))
     print("\n" + hline)
+
+    # 계획이벤트: 기한 경과(조치 필요)·임박(D-3) — 준수율의 입력이 되는 표를 매일 앞에 둔다(P1).
+    overdue_ev: list[str] = []
+    upcoming_ev: list[str] = []
+    try:
+        import compliance
+        overdue_ev, upcoming_ev = compliance.alert_lines(today)
+    except Exception as e:  # noqa: BLE001
+        overdue_ev = [f"⚠️ 계획이벤트 조회 실패: {e}"]
+    if overdue_ev or upcoming_ev:
+        print("\n📅 계획 이벤트:")
+        for ln in overdue_ev + upcoming_ev:
+            print("  " + ln)
     try:
         _atomic_write_json(_STATE_PATH, hstate)
     except Exception:  # noqa: BLE001
@@ -460,7 +473,11 @@ def _run(holdings, themes, fx, today, args, watch=None) -> "bool | None":
         if over:
             msg.append("⚠️ 테마 초과: " + " · ".join(over))
         msg.append(hline)
-        if not act and not adds and not over and not hits and not hstate.get("block_new"):
+        if overdue_ev or upcoming_ev:
+            msg.append("── 📅 계획 이벤트 ──")
+            msg += overdue_ev + upcoming_ev
+        if (not act and not adds and not over and not hits and not hstate.get("block_new")
+                and not overdue_ev):
             msg.append("🟢 개인 보유 규칙 이상 없음 · 조치 불필요")
         sent = _send_heartbeat("\n".join(msg))
         print("\n(텔레그램 전송됨 · 하트비트 기록)" if sent else "\n(⚠️ 텔레그램 전송 실패 — 하트비트 미기록)")
