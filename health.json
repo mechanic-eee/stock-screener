@@ -1,0 +1,26 @@
+{
+  "last_run_utc": "2026-09-05T00:46:30+00:00",
+  "markets": [
+    "KR",
+    "US"
+  ],
+  "base_survivors": 1613,
+  "snapshot_tickers": 1613,
+  "market_survivors": {
+    "KR": 447,
+    "US": 1166
+  },
+  "ohlc_inconsistent": {
+    "KR": 0.007,
+    "US": 0.0003
+  },
+  "last_price_date": "2026-09-04",
+  "fundamentals_available": 0.973,
+  "valuations_available": 0.995,
+  "signal_fill": {
+    "f_score": 0.905,
+    "altman_z": 0.922,
+    "accrual_ratio": 0.947,
+    "gross_profitability": 0.817
+  }
+}
