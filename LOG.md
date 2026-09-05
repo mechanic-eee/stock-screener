@@ -1,5 +1,9 @@
 # LOG — stock-screener
 
+## [2026-09-05] stock-screener | fix | 평가 P0 4건 완료·push(83a2a41→83ecfe8): ①fundamentals KR 보고서 후보 공시캘린더 순+기대분기 캐시 재조회+_SCHEMA_CUTOFF 상향(전량 재조회)+번들/사이드카/health/알림/recommend 펀더 as-of, KR 4Q lethal US 전용화 ②track._current_quote 봉날짜 vs 시장세션(>2영업일=시세 정지 None)+PRICE_MAX_AGE_DAYS 0.5 단일 ③review 하트비트 파일(전송 성공 후)+HEALTHCHECK_URL 핑+watchdog 판정 전환(-DryRun)+전송실패 exit 2+daily.ps1 review 선실행·UTF-8+WakeToRun 재등록(실검증: 실전송→하트비트→watchdog OK) ④engine.FUND4 공용 게이트를 daily_scan 알림·to_watchlist에 적용+fundamental 미가용 value=None. 테스트 15→19, CI 대기.
+
+## [2026-09-05] stock-screener | work | 전체 시스템 평가(Fable 5.1, 실측+3에이전트+🔴 재확인) → docs/시스템-평가-2026-09-05.md. 🔴4: KR 재무 1분기 고착(DB 실증, 반기 0행)·시세 신선도 fetched_at 기준(정지종목 옛가격 🟢)·워치독 성공판정=pwsh 시작(전송실패 exit0)·일일 알림 결측 게이트 없음(MCHB 3결측 87점 발송). 실행 커버리지 4주 정시 65%/무실행 5일. 프로세스: 준수율·대조군·계좌 히트 미측정. 수정은 미착수(평가만).
+
 ## [2026-05-23] stock-screener | start | 폭락주 스크리너 프로젝트 생성 (Streamlit, KR+US, 플러그인 필터)
 ## [2026-05-23] stock-screener | work | 코어 구현: models/indicators/filters(6종)/data/news/engine/app.py/scan.py + 문서·requirements
 ## [2026-05-23] stock-screener | fix | macd shift fillna 다운캐스트 경고 제거, scan.py stdout UTF-8 강제(Windows cp949 대응)
