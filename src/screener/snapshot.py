@@ -306,12 +306,13 @@ def export_fundamentals(
         "f_score": fb.f_score, "altman_z": fb.altman_z, "accrual_ratio": fb.accrual_ratio,
         "gross_profitability": fb.gross_profitability, "share_change_yoy": fb.share_change_yoy,
         "audit_qualified": bool(fb.audit_qualified), "risk_event": fb.risk_event,
+        "period": fb.period, "market": c.market,
     } for c, fb in pairs]
     out = pd.DataFrame(rows, columns=[
         "ticker", "available", "revenue_yoy", "op_margin", "debt_to_equity",
         "four_quarters_all_loss", "capital_impairment", "periods",
         "f_score", "altman_z", "accrual_ratio", "gross_profitability", "share_change_yoy",
-        "audit_qualified", "risk_event"])
+        "audit_qualified", "risk_event", "period", "market"])
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(path, index=False)
@@ -360,7 +361,35 @@ def load_fundamentals(source: Optional[str | Path] = None) -> dict:
             share_change_yoy=_opt_float(getattr(r, "share_change_yoy", None)),
             audit_qualified=bool(getattr(r, "audit_qualified", False)),
             risk_event=(lambda v: None if (v is None or (isinstance(v, float) and pd.isna(v)) or v == "") else str(v))(getattr(r, "risk_event", None)),
+            period=(lambda v: None if (v is None or (isinstance(v, float) and pd.isna(v)) or v == "") else str(v))(getattr(r, "period", None)),
         )
+    return out
+
+
+def fundamentals_asof(source: Optional[str | Path] = None) -> dict:
+    """Per-market fundamentals as-of from the sidecar: {market: {"median": ISO,
+    "latest": ISO, "n": int, "stale_share": float, "expected": ISO}}.
+
+    `stale_share` is the fraction of available rows whose period predates the
+    filing-calendar expectation (fundamentals.expected_latest_period). {} when
+    the sidecar is absent or predates the `period` column (2026-09).
+    """
+    from . import fundamentals as fundamentals_mod
+
+    df = _read_parquet(_sibling(source, FUND_NAME))
+    if df is None or df.empty or "period" not in df.columns or "market" not in df.columns:
+        return {}
+    out: dict = {}
+    for mk, g in df[df["available"] == True].groupby("market"):  # noqa: E712
+        per = g["period"].dropna().astype(str)
+        per = per[per != ""]
+        if per.empty:
+            continue
+        exp = fundamentals_mod.expected_latest_period(str(mk))
+        stale = (per < exp.isoformat()).mean()
+        out[str(mk)] = {"median": str(per.sort_values().iloc[len(per) // 2]),
+                        "latest": str(per.max()), "n": int(len(per)),
+                        "stale_share": round(float(stale), 3), "expected": exp.isoformat()}
     return out
 
 
@@ -470,6 +499,9 @@ def export_health(candidates: list[TickerData], markets: list[str],
         # 'available' (bundle presence) hides — the silent-degradation guard.
         "signal_fill": _fill_ratios(FUND_PATH, ["f_score", "altman_z", "accrual_ratio",
                                                 "gross_profitability"]),
+        # fundamentals as-of per market (2026-09-05 P0-1): a Q1 feed in September
+        # is a *data* failure that fill-rate cannot see.
+        "fundamentals_asof": fundamentals_asof(FUND_PATH),
     }
     import json
     path = Path(path)

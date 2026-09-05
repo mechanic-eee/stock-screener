@@ -20,7 +20,7 @@ import logging
 import os
 import time
 import zipfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
 import pandas as pd
@@ -49,7 +49,67 @@ _YOY_TOLERANCE_DAYS = 60   # how far from "exactly 1 year ago" a YoY match may b
 # (op_cash_flow / total_assets / Altman / Piotroski inputs / audit signals), so
 # their derived signals come back empty. Treat them as stale and refetch once,
 # so the new filters actually populate instead of waiting out the 80-day cache.
-_SCHEMA_CUTOFF = "2026-06-23"
+# 2026-09-05: bumped again — rows fetched before this date came from a KR
+# report-candidate list that never asked for the current year's 반기/3분기
+# report, so every KR row sat on 1Q data into September (시스템-평가 2026-09-05 P0-1).
+_SCHEMA_CUTOFF = "2026-09-05T11:00:00"  # UTC ISO, compared as string against fetched_at
+# A cached bundle whose latest period is older than what the market's filing
+# calendar says must exist by now is re-fetched once this many days after the
+# last fetch (cheap retry cadence for late filers / off-cycle fiscal years).
+PERIOD_STALE_RECHECK_DAYS = 7
+
+# Filing deadlines: KR quarterly/half-year reports are due 45 days after period
+# end, the annual report 90 days; US 10-Q ~40-45 days, 10-K 60-90 days. One
+# conservative lag per market so 'expected' is never ahead of reality.
+_FILING_LAG_DAYS = {"KR": {"Q": 45, "FY": 90}, "US": {"Q": 45, "FY": 90}}
+
+
+def _quarter_ends(year: int) -> list[date]:
+    return [date(year, 3, 31), date(year, 6, 30), date(year, 9, 30), date(year, 12, 31)]
+
+
+def expected_latest_period(market: str, today: Optional[date] = None) -> date:
+    """Latest calendar quarter-end whose report *must* have been filed by `today`.
+
+    Off-cycle fiscal years (US 01-31 etc.) may legitimately lag this by one
+    quarter — callers use it as a staleness *hint* (re-check cadence), not a gate.
+    """
+    today = today or date.today()
+    lag = _FILING_LAG_DAYS.get(market, _FILING_LAG_DAYS["US"])
+    best = date(today.year - 2, 12, 31)
+    for y in (today.year - 1, today.year):
+        for qe in _quarter_ends(y):
+            days = lag["FY"] if qe.month == 12 else lag["Q"]
+            if qe + timedelta(days=days) <= today and qe > best:
+                best = qe
+    return best
+
+
+def _period_stale(latest_period, market: str, today: Optional[date] = None) -> bool:
+    """True when the cached latest period predates the expected latest period."""
+    d = _to_date(latest_period)
+    if d is None:
+        return True
+    return d < expected_latest_period(market, today)
+
+
+def _kr_report_candidates(today: Optional[date] = None) -> list[tuple[int, str]]:
+    """DART (year, reprt_code) to try, newest-first, skipping reports whose period
+    hasn't ended yet (each entry is one API call when absent).
+
+    Pre-2026-09 the list only tried the current year's 1Q (11013) and then fell
+    back to *last* year, so from mid-August every KR name scored on March data.
+    """
+    today = today or date.today()
+    ty = today.year
+    order = [(ty, "11014"), (ty, "11012"), (ty, "11013"), (ty - 1, "11011"),
+             (ty - 1, "11014"), (ty - 1, "11012"), (ty - 1, "11013"), (ty - 2, "11011")]
+    out = []
+    for yr, rc in order:
+        mm, dd = _REPRT_MONTH_DAY[rc].split("-")
+        if date(yr, int(mm), int(dd)) < today:
+            out.append((yr, rc))
+    return out
 
 # Per-process cache of precomputed derived bundles, keyed by ticker. The hosted
 # app has neither a DART key nor the SQLite cache (screener.db isn't published),
@@ -155,8 +215,13 @@ def _signals_from_rows(rows: list[dict], market: str = "US") -> FundamentalsBund
     # gate built on mere *unprofitability* — which over-excludes the very recovery
     # candidates this screen targets (a fallen name with loss quarters that is
     # solvent and turning around). So it is intentionally not implemented for KR.
-    ni_hist = [r.get("net_income") for r in rows[:4] if r.get("net_income") is not None]
-    four_q_all_loss = len(ni_hist) >= 4 and all(x < 0 for x in ni_hist)
+    # Enforced in code (not just by row count): once the cache holds several KR
+    # periods (1Q/FY/1Q/FY...) the length check alone would fire on cumulative rows.
+    if market == "US":
+        ni_hist = [r.get("net_income") for r in rows[:4] if r.get("net_income") is not None]
+        four_q_all_loss = len(ni_hist) >= 4 and all(x < 0 for x in ni_hist)
+    else:
+        four_q_all_loss = False
 
     # --- extra derived signals (all guard their own inputs; None when missing) ---
     ni = cur.get("net_income")
@@ -212,6 +277,7 @@ def _signals_from_rows(rows: list[dict], market: str = "US") -> FundamentalsBund
         share_change_yoy=share_change_yoy,
         audit_qualified=bool(cur.get("audit_qualified")),
         risk_event=(cur.get("risk_event") or None),
+        period=str(cur.get("period")) if cur.get("period") else None,
     )
 
 
@@ -588,11 +654,9 @@ def _fetch_kr(ticker: str) -> list[dict]:
     if not corp:
         return []
 
-    # Find the most recent available report, newest-likely first. (DART IS lines
-    # often omit prior-period comparatives, so we don't rely on frmtrm.)
-    ty = date.today().year
-    candidates = [(ty, "11013"), (ty - 1, "11011"), (ty - 1, "11014"),
-                  (ty - 1, "11012"), (ty - 1, "11013"), (ty - 2, "11011")]
+    # Find the most recent available report, newest-first by filing calendar.
+    # (DART IS lines often omit prior-period comparatives, so we don't rely on frmtrm.)
+    candidates = _kr_report_candidates()
     cur_year = cur_rc = None
     report: list[dict] = []
     for yr, rc in candidates:
@@ -622,17 +686,22 @@ def _fetch_kr(ticker: str) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # Cache + public entry point
 # --------------------------------------------------------------------------- #
-def _load_cached(conn, ticker: str) -> Optional[list[dict]]:
+def _load_cached(conn, ticker: str, market: str = "US") -> Optional[list[dict]]:
     row = conn.execute(
-        "SELECT MAX(fetched_at) FROM fundamentals WHERE ticker=?", (ticker,)
+        "SELECT MAX(fetched_at), MAX(period) FROM fundamentals WHERE ticker=?", (ticker,)
     ).fetchone()
     if not row or not row[0]:
         return None
     if row[0] < _SCHEMA_CUTOFF:
-        return None  # pre-extended-schema row -> refetch once to populate new columns
+        return None  # pre-cutoff row -> refetch once (schema / fetch-logic change)
     fetched = _to_date(row[0])
-    if fetched and (date.today() - fetched).days > REFRESH_DAYS:
-        return None  # stale
+    age = (date.today() - fetched).days if fetched else None
+    if age is not None and age > REFRESH_DAYS:
+        return None  # stale by wall clock
+    # Stale by filing calendar: a newer report must exist by now but the cache
+    # still holds the older period -> re-check on a short cadence.
+    if (age is None or age >= PERIOD_STALE_RECHECK_DAYS) and _period_stale(row[1], market):
+        return None
     cur = conn.execute(
         "SELECT period, revenue, op_income, net_income, total_debt, total_equity, shares, "
         "op_cash_flow, gross_profit, current_assets, current_liabilities, "
@@ -677,6 +746,12 @@ def latest_raw(ticker: str) -> Optional[dict]:
         conn.close()
 
 
+def primed_bundle(ticker: str) -> Optional[FundamentalsBundle]:
+    """The sidecar-primed bundle for `ticker` (None if not primed). Never fetches —
+    for consumers that only need metadata such as the fundamentals as-of period."""
+    return _primed.get(ticker)
+
+
 def get_fundamentals(market: str, ticker: str, use_cache: bool = True,
                      max_retries: int = 3) -> FundamentalsBundle:
     """Fetch (or load cached) fundamentals and return the derived bundle.
@@ -692,7 +767,7 @@ def get_fundamentals(market: str, ticker: str, use_cache: bool = True,
     conn = db_mod.get_connection()
     try:
         if use_cache:
-            cached = _load_cached(conn, ticker)
+            cached = _load_cached(conn, ticker, market)
             if cached is not None:
                 return _signals_from_rows(cached, market)
 

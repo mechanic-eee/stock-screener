@@ -121,6 +121,25 @@ def apply_gates(rows: list[dict], atr_max: float = 8.0,
 # --------------------------------------------------------------------------- #
 # 데이터 로드 · 부착
 # --------------------------------------------------------------------------- #
+def _fund_asof_line(source: str) -> str:
+    """'펀더 기준: KR 2026-06-30(중앙값) · US 2026-06-30' — 시세 기준일 옆에 나란히.
+    사이드카가 period 열을 갖기 전(2026-09 이전)이면 빈 문자열."""
+    try:
+        from screener import snapshot
+        a = snapshot.fundamentals_asof(source)
+    except Exception:  # noqa: BLE001
+        return ""
+    if not a:
+        return ""
+    parts = []
+    for mk in sorted(a):
+        x = a[mk]
+        warn = (f" ⚠️ {x['stale_share']:.0%}가 기대분기({x['expected']}) 이전"
+                if (x.get("stale_share") or 0) > 0.5 else "")
+        parts.append(f"{mk} {x['median']}(중앙값){warn}")
+    return "펀더 기준: " + " · ".join(parts) + " — 점수·게이트가 본 재무 분기"
+
+
 def _load_rows(source: str, min_drop: int, years: int):
     """스냅샷 → 검증 세트 랭킹 행 + (거래대금·ATR손절·사이징 부착용) 가격 프레임."""
     from screener import engine, snapshot
@@ -272,7 +291,7 @@ def _fmt(market: str, v) -> str:
 
 def _checklist_md(finalists: list[dict], dropped_all: list[tuple[dict, str]],
                   regime: dict, risk_pct: float, today: str,
-                  asof_line: str = "", acct_line: str = "",
+                  asof_line: str = "", acct_line: str = "", fund_line: str = "",
                   priority_n: int = 5) -> str:
     out = [f"# 추천 깔때기 체크리스트 — {today}",
            "",
@@ -281,7 +300,7 @@ def _checklist_md(finalists: list[dict], dropped_all: list[tuple[dict, str]],
            f"> **⭐ 우선 리서치(시장별 {priority_n})부터** — 나머지는 여유 있을 때만.",
            "> 규칙·숫자는 12주 고정 (docs/recommendation-design-2026-07-17.md).", ""]
     if asof_line:
-        out += [f"**{asof_line}**", ""]
+        out += [f"**{asof_line}**"] + ([fund_line] if fund_line else []) + [""]
     if acct_line:
         out += [f"**{acct_line}**", ""]
     reg_parts = []
@@ -400,6 +419,7 @@ def main() -> int:
               "(강행: --allow-stale). 낡은 가격으로 진입·손절 초안을 내지 않습니다.")
         return 1
     stale_note = (f" ⚠️ {behind}영업일 낡음 — 휴장 또는 스캔 지연 확인" if behind else "")
+    fund_line = _fund_asof_line(args.snapshot)
 
     finalists: list[dict] = []
     dropped_all: list[tuple[dict, str]] = []
@@ -455,6 +475,8 @@ def main() -> int:
                  "실계좌와 다르면 수량·비중은 예시일 뿐")
     print(f"\n시세 기준일: {asof} 종가{stale_note} — 진입·손절·수량 초안의 기준, "
           "주문 전 현재가로 재계산" if asof else "\n⚠️ 시세 기준일 산출 불가")
+    if fund_line:
+        print(fund_line)
     print(acct_line)
     print(f"레짐: {reg_txt}")
     print(f"비용: 왕복 KR {COST_NOTE['KR'][0]} · US {COST_NOTE['US'][0]} "
@@ -496,6 +518,7 @@ def main() -> int:
         out_path.write_text(_checklist_md(finalists, dropped_all, regime,
                                           args.risk, today,
                                           asof_line=asof_line, acct_line=acct_line,
+                                          fund_line=fund_line,
                                           priority_n=args.priority), encoding="utf-8")
         print(f"\n✅ 체크리스트 저장: {out_path}")
         print("다음: 체크리스트(종목당 15분, 베토 주 2건 상한) → 3~5픽 → "

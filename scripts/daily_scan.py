@@ -253,6 +253,18 @@ def main() -> int:
         hp = [f"시세 {health.get('last_price_date', '?')}"]
         if fa is not None:
             hp.append(f"펀더 {fa:.0%}")
+        # fundamentals as-of (P0-1): show the median period per market and warn
+        # when most rows predate the filing calendar's expected latest period.
+        fasof = health.get("fundamentals_asof") or {}
+        if fasof:
+            parts = []
+            for mk in sorted(fasof):
+                a = fasof[mk]
+                flag = "⚠️" if (a.get("stale_share") or 0) > 0.5 else ""
+                parts.append(f"{mk} {str(a.get('median', '?'))[2:]}{flag}")
+                if (a.get("stale_share") or 0) > 0.5:
+                    warn = "⚠️ "
+            hp.append("펀더기준 " + "/".join(parts))
         if fill is not None:
             hp.append(f"신규신호 {fill:.0%}")
         if oh is not None and oh > 0.05:

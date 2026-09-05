@@ -137,6 +137,10 @@ class FundamentalsBundle:
     # KR exchange-confirmed distress (DART), None/False for US:
     audit_qualified: bool = False            # most recent audit opinion non-적정 (한정/부적정/의견거절)
     risk_event: Optional[str] = None         # recent 부도/영업정지/회생/채권은행관리 event, else None
+    # As-of: the latest financial period end (ISO date) behind every signal above.
+    # Surfaced in the snapshot health line / recommend header so a stale
+    # fundamentals feed is visible next to the price as-of (2026-09-05 P0-1).
+    period: Optional[str] = None
 
 
 @dataclass

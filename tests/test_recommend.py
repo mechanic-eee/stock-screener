@@ -491,6 +491,42 @@ def test_biz_days_behind() -> None:
     print("  biz-days-behind: boundary cases OK")
 
 
+def test_fundamentals_period_calendar():
+    """P0-1 (2026-09-05): KR report candidates follow the filing calendar, cache
+    staleness knows the expected latest period, bundles carry their as-of period,
+    and the KR 4-quarter-loss flag is inert in code (not just by row count)."""
+    from screener import fundamentals as f
+
+    # expected latest period by filing calendar (45d quarterly / 90d annual)
+    assert f.expected_latest_period("KR", date(2026, 9, 5)) == date(2026, 6, 30)
+    assert f.expected_latest_period("KR", date(2026, 8, 13)) == date(2026, 3, 31)   # 반기 due 8/14
+    assert f.expected_latest_period("KR", date(2026, 8, 14)) == date(2026, 6, 30)
+    assert f.expected_latest_period("US", date(2026, 4, 1)) == date(2025, 12, 31)   # 10-K 90d
+    assert f.expected_latest_period("US", date(2026, 3, 30)) == date(2025, 9, 30)
+    assert f._period_stale("2026-03-31", "KR", date(2026, 9, 5)) is True
+    assert f._period_stale("2026-06-30", "KR", date(2026, 9, 5)) is False
+    assert f._period_stale(None, "KR", date(2026, 9, 5)) is True
+
+    # KR candidates: newest-first, current-year 반기 before last year's FY,
+    # and a report whose period hasn't ended is never requested.
+    c = f._kr_report_candidates(date(2026, 9, 5))
+    assert c[0] == (2026, "11012") and (2026, "11014") not in c
+    assert c.index((2026, "11012")) < c.index((2025, "11011"))
+    c = f._kr_report_candidates(date(2026, 11, 20))
+    assert c[0] == (2026, "11014")
+    c = f._kr_report_candidates(date(2026, 2, 10))
+    assert c[0] == (2025, "11011") and all(yr < 2026 for yr, _ in c)
+
+    # bundle carries its as-of period; KR 4Q-loss inert, US fires
+    rows = [{"period": p, "net_income": -1.0, "revenue": 10.0, "total_equity": 5.0}
+            for p in ("2026-06-30", "2026-03-31", "2025-12-31", "2025-06-30")]
+    kr = f._signals_from_rows(rows, "KR")
+    us = f._signals_from_rows(rows, "US")
+    assert kr.period == "2026-06-30" and us.period == "2026-06-30"
+    assert kr.four_quarters_all_loss is False and us.four_quarters_all_loss is True
+    print("  fundamentals period calendar: expected/stale/candidates/4Q-KR-inert OK")
+
+
 def main() -> int:
     test_gates()
     test_paper_cohorts()
@@ -507,6 +543,7 @@ def main() -> int:
     test_weekly_cohort_lines()
     test_score_regex_formats()
     test_biz_days_behind()
+    test_fundamentals_period_calendar()
     print("✅ test_recommend: all passed")
     return 0
 
