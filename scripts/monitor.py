@@ -46,7 +46,63 @@ def _held_positions() -> list[dict]:
     for r in track._records_from(track.DECISIONS, "decision"):
         if "보유" in (r.get("status") or ""):
             by[r["ticker"]].append(r)
-    return [track._merge_tranches(v) for v in by.values()]
+    out = []
+    for v in by.values():
+        m = track._merge_tranches(v)
+        # 손절 유효 시작일 = 가장 최근 트랜치/손절 결정일. 그 전의 종가는 현재 손절과
+        # 비교하면 안 된다(2차 트랜치로 손절이 올라간 경우 과거 봉이 '이탈'로 오독됨).
+        ds = [r.get("date") for r in v if r.get("date")]
+        m["stop_since"] = max(ds) if ds else None
+        out.append(m)
+    return out
+
+
+def _breach_exit(bars: list, stop: float, since=None):
+    """(breach_date, breach_close, exit_date, exit_close|None) 또는 None.
+
+    bars = [(date, close)] 오름차순. since 이후(초과) 첫 종가 ≤ stop 봉이 이탈일 B,
+    그 다음 봉이 있으면 그 종가가 청산가(규칙: 종가 이탈 → 익일 종가 체결 가정).
+    이탈 후 반등해도 청산한다 — 손절 규칙은 종가 기준이지 '지금 가격' 기준이 아니다."""
+    for i, (d, c) in enumerate(bars):
+        if since is not None and d is not None and d <= since:
+            continue
+        if c is not None and c <= stop:
+            if i + 1 < len(bars):
+                return d, c, bars[i + 1][0], bars[i + 1][1]
+            return d, c, None, None
+    return None
+
+
+def _auto_paper_exit(it: dict, mkt: str, tkr: str, stop: float, dry_run: bool = False) -> str | None:
+    """페이퍼 포지션의 손절 이탈을 규칙대로 자동 집행(P1, 2026-09-06).
+
+    MNSO는 8/27 이탈 → 9/5 기록(6거래일)이었다: 페이퍼는 Claude 전결인데 집행은 세션이
+    열려야 일어났다. 이제 monitor가 이탈 다음 봉의 종가로 decide.close_position을 호출한다.
+    실계좌 포지션은 여기 오지 않는다(알림만 — 사용자 집행)."""
+    try:
+        from screener.data import prices as prices_mod
+        import decide
+        df = prices_mod.get_prices(mkt, tkr, years=1, max_age_days=track.PRICE_MAX_AGE_DAYS)
+        if df is None or df.empty:
+            return None
+        bars = [(track._bar_date(ix), float(c)) for ix, c in df["close"].tail(60).items()]
+        hit = _breach_exit(bars, stop, it.get("stop_since"))
+        if hit is None:
+            return None
+        b_d, b_c, x_d, x_c = hit
+        if x_d is None:
+            return f"⏳ 페이퍼 손절 이탈 확인({b_d} 종가 {track._fmt(mkt, b_c)}) — 다음 거래일 종가로 자동 청산"
+        note = (f"[페이퍼 손절 자동집행] {b_d} 종가 {track._fmt(mkt, b_c)} ≤ 손절 {track._fmt(mkt, stop)} 이탈 "
+                f"→ 익일({x_d}) 종가 체결 가정 (monitor 자동)")
+        res = decide.close_position(tkr, x_c, note=note, date_str=x_d.isoformat(), src="auto-stop",
+                                    code="손절", dry_run=dry_run)
+        if not res:
+            return None
+        ra = res.get("ret_avg")
+        return (f"{'🧪(dry-run) ' if dry_run else ''}🤖 페이퍼 자동청산 {x_d} 종가 {track._fmt(mkt, x_c)}"
+                + (f" ({ra:+.1f}%)" if ra is not None else "") + " — DECISIONS 기록됨")
+    except Exception as e:  # noqa: BLE001 — 자동집행 실패는 알림으로만
+        return f"⚠️ 페이퍼 자동청산 실패: {e}"
 
 
 def _distress(market: str, ticker: str) -> list[str] | None:
@@ -244,6 +300,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--telegram", action="store_true", help="알림이 있으면 텔레그램 전송")
     ap.add_argument("--loss-alert", type=float, default=30.0, help="이 %% 이상 손실이면 경고(기본 30)")
+    ap.add_argument("--no-auto-exit", action="store_true",
+                    help="페이퍼 포지션 손절 이탈 시 자동 청산 기록 생략(기본: 익일 종가로 자동 집행)")
+    ap.add_argument("--auto-exit-dry-run", action="store_true",
+                    help="자동 청산을 판정만 하고 DECISIONS에 쓰지 않음(검증용)")
     ap.add_argument("--no-distress", action="store_true", help="DART/펀더 위험 재점검 생략(빠름)")
     ap.add_argument("--no-rank-check", action="store_true",
                     help="스냅샷 랭킹 강등 체크 생략(스냅샷 다운로드·랭킹 ~1분 절약)")
@@ -289,6 +349,12 @@ def main() -> int:
             flags.append(f"🔴 {why or '가격조회 실패'} — 손절 감시 불능(거래정지·상폐·데이터 장애 확인)")
         if cur is not None and stop and cur <= stop:
             flags.append(f"🔴 손절이탈(현재 {track._fmt(mkt, cur)} ≤ 손절 {track._fmt(mkt, stop)})")
+        # 페이퍼 손절 자동 집행: 최신 종가만이 아니라 손절 유효기간 내 어떤 봉이든 이탈했으면
+        # 규칙대로 익일 종가 청산(휩쏘 반등도 청산 — 규칙은 종가 기준).
+        if it.get("paper") and stop and cur is not None and not args.no_auto_exit:
+            msg_auto = _auto_paper_exit(it, mkt, tkr, stop, dry_run=args.auto_exit_dry_run)
+            if msg_auto:
+                flags.append(msg_auto)
         if ret is not None and ret <= -abs(args.loss_alert):
             flags.append(f"🟠 손실 {ret:+.0f}%")
         if not args.no_distress:

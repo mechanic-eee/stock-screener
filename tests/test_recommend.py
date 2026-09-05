@@ -678,6 +678,61 @@ def test_account_heat():
     print("  account heat: open-risk/total, no-stop=full, skip, block flags OK")
 
 
+def test_paper_auto_exit_and_close_position():
+    """P1 (2026-09-06): breach/exit bar selection honours the stop's effective
+    date and the next-close rule; close_position closes every tranche row,
+    appends a trailer-tagged bullet and a jsonl record."""
+    import monitor
+    import decide
+
+    bars = [(date(2026, 8, 25), 12.0), (date(2026, 8, 26), 11.5), (date(2026, 8, 27), 10.81),
+            (date(2026, 8, 28), 10.33), (date(2026, 8, 31), 10.9)]
+    assert monitor._breach_exit(bars, 11.39, since=date(2026, 8, 7)) == \
+        (date(2026, 8, 27), 10.81, date(2026, 8, 28), 10.33)
+    # breach on the last bar -> pending (no exit close yet)
+    assert monitor._breach_exit(bars[:3], 11.39) == (date(2026, 8, 27), 10.81, None, None)
+    # bars on/before the stop's effective date are ignored (raised stop must not re-read history)
+    assert monitor._breach_exit(bars, 10.5) == (date(2026, 8, 28), 10.33, date(2026, 8, 31), 10.9)
+    assert monitor._breach_exit(bars, 10.5, since=date(2026, 8, 28)) is None
+    assert monitor._breach_exit(bars, 9.0) is None
+
+    tmp = Path(tempfile.mkdtemp())
+    dec = tmp / "DECISIONS.md"
+    dec.write_text("\n".join([
+        "# D", "", "## 📌 포지션 (보유·청산)", "",
+        "| 날짜 | 티커 | 액션 | 진입가 | 손절 | 수량 | 비중% | 논거 (점수) | 상태 | 청산가/수익률 |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+        "| _예) 2026-06-25_ | _005930_ | _매수_ | _58,400_ | _52,000_ | _17_ | _10%_ | _x_ | _보유_ | _—_ |",
+        "| 2026-07-18 | 259630 | 매수 | 9,720 | 7,923 | 55 | 5% | a (점수 85) | 보유(페이퍼) | — |",
+        "| 2026-08-17 | 259630 | 추가매수 | 10,170 | 8,727 | 51 | 7% | b (점수 85) | 보유(페이퍼) | — |",
+        "| 2026-08-11 | NVO | 매수 | 47.59 | 43.10 | 20 | 10% | c | 보유 | — |",
+        "", "## 🗒 결정 로그 (관망·보류 포함, append-only, 최신 위)", "> note", "",
+        "- [2026-09-05] older bullet", ""]), encoding="utf-8")
+    jl = tmp / "decisions.jsonl"
+    od, oj = decide.DECISIONS, decide.JSONL
+    decide.DECISIONS, decide.JSONL = dec, jl
+    try:
+        res = decide.close_position("259630", 8500.0, note="[페이퍼 손절 자동집행] test",
+                                    date_str="2026-09-04", src="auto-stop", code="손절")
+        assert res and len(res["rows"]) == 2 and res["paper"] is True
+        txt = dec.read_text(encoding="utf-8")
+        assert txt.count("| 청산(페이퍼) |") == 2 and "| 보유 | — |" in txt      # both tranches closed, NVO untouched
+        assert "8,500 (-12.6%)" in txt and "8,500 (-16.4%)" in txt
+        bl = [ln for ln in txt.splitlines() if ln.startswith("- [2026-09-04] 259630 청산(페이퍼)")]
+        assert bl and "| verdict=청산 | src=auto-stop | px=8500 | code=손절" in bl[0]
+        assert txt.index(bl[0]) < txt.index("- [2026-09-05] older bullet")   # 최신 위
+        import json
+        rec = json.loads(jl.read_text(encoding="utf-8").strip().splitlines()[-1])
+        assert rec["ticker"] == "259630" and rec["verdict"] == "청산" and rec["rows"] == 2 and rec["paper"]
+        assert decide.close_position("ZZZ", 1.0) is None
+        assert decide._trailer("관망", "tip", 4.57, "ATR", "2026-12-10") == \
+            " | verdict=관망 | src=tip | px=4.57 | code=ATR | recheck=2026-12-10"
+        assert decide._trailer() == ""
+    finally:
+        decide.DECISIONS, decide.JSONL = od, oj
+    print("  paper auto-exit: breach/exit bars, close all tranches, trailer+jsonl OK")
+
+
 def main() -> int:
     test_gates()
     test_paper_cohorts()
@@ -699,6 +754,7 @@ def main() -> int:
     test_heartbeat_only_after_send()
     test_fund4_gate_shared_and_fundamental_unavailable()
     test_account_heat()
+    test_paper_auto_exit_and_close_position()
     print("✅ test_recommend: all passed")
     return 0
 
