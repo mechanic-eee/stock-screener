@@ -527,6 +527,52 @@ def test_fundamentals_period_calendar():
     print("  fundamentals period calendar: expected/stale/candidates/4Q-KR-inert OK")
 
 
+def test_price_freshness_by_bar_date():
+    """P0-2 (2026-09-05): a feed that keeps returning the pre-suspension bar must
+    come back as price=None with a reason, judged against the market's last
+    session (holiday-proof), and the ⚪ verdict must show that reason."""
+    import pandas as pd
+    import track
+    from screener.data import prices as prices_mod
+
+    calls = {}
+    def fake_get_prices(market, ticker, years=1, max_age_days=1.0, **kw):
+        calls["max_age"] = max_age_days
+        if ticker == "EMPTY":
+            return pd.DataFrame()
+        idx = pd.to_datetime(["2026-08-28", "2026-09-01"])
+        return pd.DataFrame({"close": [10.0, 11.0]}, index=idx)
+    orig = prices_mod.get_prices
+    prices_mod.get_prices = fake_get_prices
+    try:
+        # bar 9/1, market last session 9/4 -> 3 biz days behind -> stale (None + reason)
+        px, bar, why = track._current_quote("US", "X", ref_date=date(2026, 9, 4))
+        assert px is None and bar == date(2026, 9, 1) and "시세 정지 3영업일" in why
+        # market last session 9/3 -> 2 biz days -> still acceptable
+        px, _, why = track._current_quote("US", "X", ref_date=date(2026, 9, 3))
+        assert px == 11.0 and why is None
+        # market itself closed since 9/1 (long holiday) -> not stale
+        assert track._current_quote("KR", "X", ref_date=date(2026, 9, 1))[0] == 11.0
+        # empty frame -> explicit fetch failure
+        assert track._current_quote("US", "EMPTY", ref_date=date(2026, 9, 4)) == (None, None, "가격조회 실패")
+        # single cache max-age for every consumer (<1.0 so 08:10 never reuses yesterday)
+        track._current_price("US", "X")
+        assert calls["max_age"] == track.PRICE_MAX_AGE_DAYS < 1.0
+    finally:
+        prices_mod.get_prices = orig
+
+    assert track.biz_days_behind(date(2026, 9, 4), date(2026, 9, 7)) == 1   # Fri -> Mon
+    assert track.biz_days_behind(date(2026, 9, 1), date(2026, 9, 1)) == 0
+
+    import review
+    h = {"ticker": "X", "market": "US", "shares": 1, "cost": 10.0, "stop": 9.0}
+    v = review._verdict(h, None, None, None, None, date(2026, 9, 5), price_note="시세 정지 3영업일(마지막 봉 2026-09-01)")
+    assert v["tag"].startswith("⚪") and "시세 정지 3영업일" in v["flags"][0]
+    v = review._verdict(h, None, None, None, None, date(2026, 9, 5))
+    assert "가격조회 실패" in v["flags"][0]
+    print("  price freshness: bar-date vs market session / reason / single max-age OK")
+
+
 def main() -> int:
     test_gates()
     test_paper_cohorts()
@@ -544,6 +590,7 @@ def main() -> int:
     test_score_regex_formats()
     test_biz_days_behind()
     test_fundamentals_period_calendar()
+    test_price_freshness_by_bar_date()
     print("✅ test_recommend: all passed")
     return 0
 

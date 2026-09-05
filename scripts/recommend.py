@@ -62,15 +62,10 @@ COST_NOTE = {"KR": ("≈0.45%", "거래세 0.15% + 슬리피지 0.15%×2"),
 
 def _biz_days_behind(last, today) -> int:
     """last(date) 이후 today까지의 주중 일수 — 시세 신선도 판정용(휴일 미고려라
-    1일 지연은 휴장일 수 있음; 2일 초과는 확실한 이상)."""
-    from datetime import timedelta
+    1일 지연은 휴장일 수 있음; 2일 초과는 확실한 이상). 구현은 track.biz_days_behind 단일."""
+    import track
 
-    n, cur = 0, last
-    while cur < today:
-        cur += timedelta(days=1)
-        if cur.weekday() < 5:
-            n += 1
-    return n
+    return track.biz_days_behind(last, today)
 
 
 # --------------------------------------------------------------------------- #

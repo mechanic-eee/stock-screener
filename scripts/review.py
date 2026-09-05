@@ -64,7 +64,8 @@ def _atomic_write_json(path: Path, obj) -> None:
 
 
 def _verdict(h: dict, price, rank, distress, edgar_new, today: dt.date,
-             loss_alert: float = 35.0, stop_near_pct: float = 8.0) -> dict:
+             loss_alert: float = 35.0, stop_near_pct: float = 8.0,
+             price_note: "str | None" = None) -> dict:
     """(순수 함수 — 테스트 대상) 한 종목의 규율 판정.
 
     입력은 이미 조회된 값(가격/랭킹/위험/EDGAR)만 받아 IO와 분리. 반환:
@@ -81,7 +82,10 @@ def _verdict(h: dict, price, rank, distress, edgar_new, today: dt.date,
     adds: list[str] = []
 
     if price is None:
-        return {"tag": "⚪ 정보없음", "flags": ["가격조회 실패 — 거래정지·상폐·데이터장애 확인"],
+        # price_note: track._current_quote의 사유('시세 정지 N영업일…' 등) — 조회 실패와
+        # '피드는 살았는데 봉이 멈춤'을 구분해 보여준다(P0-2).
+        return {"tag": "⚪ 정보없음",
+                "flags": [f"{price_note or '가격조회 실패'} — 거래정지·상폐·데이터장애 확인"],
                 "adds": [], "soft": [], "ret": None, "vs_stop": None}
 
     ret = ((price - cost) / cost * 100.0) if cost else None
@@ -245,7 +249,7 @@ def _run(holdings, themes, fx, today, args, watch=None) -> None:
     for h in holdings:
         try:
             mkt, tkr = h["market"], h["ticker"]
-            price = track._current_price(mkt, tkr, max_age_days=0.5)  # 08:10 재조회 보장(finding 11)
+            price, _bar, price_note = track._current_quote(mkt, tkr)  # 캐시 수명·정지 판정은 track 단일 소스(P0-2)
             distress = None if args.no_distress else monitor._distress(mkt, tkr)
             edgar_new = None
             # ETN/ETP 티커는 CIK가 발행 은행으로 매핑돼(예: GDXU→Bank of Montreal)
@@ -260,7 +264,8 @@ def _run(holdings, themes, fx, today, args, watch=None) -> None:
                     edgar_seen[tkr] = (list(prev) + [a for a in accs if a not in prev])[-80:]
             rk = ranks.get(tkr) if ranks else None
             v = _verdict(h, price, rk, distress, edgar_new, today,
-                         loss_alert=args.loss_alert, stop_near_pct=args.stop_near)
+                         loss_alert=args.loss_alert, stop_near_pct=args.stop_near,
+                         price_note=price_note)
             sh = h.get("shares") or 0
             val_native = (price * sh) if (price and sh > 0) else None
             val_usd = None if val_native is None else (val_native / fx if mkt == "KR" else val_native)
@@ -304,7 +309,7 @@ def _run(holdings, themes, fx, today, args, watch=None) -> None:
                 px = price_by_tkr.get(tkr)
                 if px is None and tkr:
                     try:
-                        px = track._current_price(w.get("market", "US"), tkr, max_age_days=0.5)
+                        px = track._current_price(w.get("market", "US"), tkr)
                     except Exception:  # noqa: BLE001
                         px = None
                     fetch_failed = px is None

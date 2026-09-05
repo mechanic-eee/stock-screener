@@ -277,7 +277,7 @@ def main() -> int:
     vs_list: list[tuple[float, str]] = []   # (손절여유, 티커) — 하트비트용
     for it in held:
         mkt, tkr = it["market"], it["ticker"]
-        cur = track._current_price(mkt, tkr)
+        cur, _bar, why = track._current_quote(mkt, tkr)
         ret = ((cur - it["ref_price"]) / it["ref_price"] * 100.0) if cur else None
         stop = it.get("stop")
         flags: list[str] = []
@@ -285,7 +285,8 @@ def main() -> int:
         if cur is None:
             # fail-closed: 이 유니버스의 파국(거래정지→상폐)은 정확히 가격 피드가
             # 죽는 사건이다 — 예전엔 이때 "가격없음 ✅"로 침묵했다(감사 [상-2]).
-            flags.append("🔴 가격조회 실패 — 손절 감시 불능(거래정지·상폐·데이터 장애 확인)")
+            # 피드가 '죽지 않고 멈추는' 경우(정지 직전 봉 반복)는 봉 날짜로 잡는다(P0-2).
+            flags.append(f"🔴 {why or '가격조회 실패'} — 손절 감시 불능(거래정지·상폐·데이터 장애 확인)")
         if cur is not None and stop and cur <= stop:
             flags.append(f"🔴 손절이탈(현재 {track._fmt(mkt, cur)} ≤ 손절 {track._fmt(mkt, stop)})")
         if ret is not None and ret <= -abs(args.loss_alert):

@@ -170,14 +170,86 @@ def _merge_tranches(rows: list[dict]) -> dict:
     return base
 
 
-def _current_price(market: str, ticker: str, max_age_days: float = 1.0):
-    # max_age_days: 고정 08:10 스케줄 + 캐시히트가 fetched_at을 갱신하지 않아 격일로
-    # 하루 묵은 가격을 재사용하던 갭(감사 finding 11) — review는 <1.0으로 재조회 강제.
+# 시세 캐시 수명(일). 08:10 고정 실행이 전날 캐시를 재사용하지 않도록 <1.0(감사 finding 11).
+# track/monitor/review가 전부 이 값을 쓴다 — 스크립트마다 달라 같은 런에서 SIRI가
+# $28.46/$29.12로 갈리던 비결정성 제거(시스템-평가 2026-09-05 P0-2).
+PRICE_MAX_AGE_DAYS = 0.5
+# 마지막 봉이 시장의 최종 거래일보다 이만큼(영업일) 넘게 뒤지면 '시세 정지'로 취급해
+# 가격을 None으로 돌린다. 거래정지 종목은 피드가 죽지 않고 정지 직전 히스토리를 계속
+# 돌려주므로 fetched_at 기준 신선도로는 잡히지 않는다(옛 종가로 매일 🟢).
+PRICE_STALE_BIZ_DAYS = 2
+
+_market_last: dict[str, "date | None"] = {}
+
+
+def biz_days_behind(last: date, today: date) -> int:
+    """last 이후 today까지의 주중 일수(휴일 미고려). 시장 최종 거래일을 기준으로
+    쓰면 휴장은 자동 상쇄된다."""
+    from datetime import timedelta
+
+    n, cur = 0, last
+    while cur < today:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            n += 1
+    return n
+
+
+def _bar_date(x) -> "date | None":
+    try:
+        return x.date()
+    except Exception:  # noqa: BLE001
+        try:
+            return date.fromisoformat(str(x)[:10])
+        except Exception:  # noqa: BLE001
+            return None
+
+
+def _market_last_date(market: str) -> "date | None":
+    """시장 벤치마크(KS11/^GSPC)의 마지막 봉 날짜 — 휴장일에 강건한 '오늘의 기준 거래일'.
+    프로세스당 1회 조회. 실패 시 None(호출자는 달력 오늘로 폴백)."""
+    if market in _market_last:
+        return _market_last[market]
+    out = None
+    try:
+        from screener import benchmark
+        from screener.data import prices as prices_mod
+        sym = getattr(benchmark, "_BENCH", {}).get(market)
+        if sym:
+            df = prices_mod.get_prices(market, sym, years=1, max_age_days=PRICE_MAX_AGE_DAYS)
+            if df is not None and not df.empty:
+                out = _bar_date(df.index.max())
+    except Exception:  # noqa: BLE001
+        out = None
+    _market_last[market] = out
+    return out
+
+
+def _current_quote(market: str, ticker: str, max_age_days: float = PRICE_MAX_AGE_DAYS,
+                   ref_date: "date | None" = None):
+    """(price, bar_date, stale_reason). price=None이면 stale_reason에 이유가 들어 있다.
+
+    마지막 봉이 시장 최종 거래일(ref_date, 기본=벤치마크 마지막 봉)보다
+    PRICE_STALE_BIZ_DAYS 영업일 넘게 뒤지면 '시세 정지'로 판정한다 — 이 유니버스의
+    파국(거래정지→상폐)을 fail-closed로 잡는 유일한 방법이다."""
     from screener.data import prices as prices_mod
     df = prices_mod.get_prices(market, ticker, years=1, max_age_days=max_age_days)
     if df is None or df.empty:
-        return None
-    return float(df["close"].iloc[-1])
+        return None, None, "가격조회 실패"
+    bar = _bar_date(df.index.max())
+    price = float(df["close"].iloc[-1])
+    ref = ref_date or _market_last_date(market) or date.today()
+    if bar is not None:
+        behind = biz_days_behind(bar, ref)
+        if behind > PRICE_STALE_BIZ_DAYS:
+            return None, bar, (f"시세 정지 {behind}영업일(마지막 봉 {bar.isoformat()}, "
+                               f"시장 기준일 {ref.isoformat()})")
+    return price, bar, None
+
+
+def _current_price(market: str, ticker: str, max_age_days: float = PRICE_MAX_AGE_DAYS):
+    """현재가 또는 None(조회 실패·시세 정지). 이유가 필요하면 _current_quote."""
+    return _current_quote(market, ticker, max_age_days)[0]
 
 
 def _fmt(market: str, v) -> str:
