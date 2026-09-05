@@ -131,6 +131,11 @@ def _rows_from_snapshot(source: str, min_drop: int, years: int,
     base = {"years": years, "min_drop_pct": min_drop}
     rows = engine.apply_filters(cands, base_params=base, selected=selected or {},
                                 weights=weights or None, fetch_news=False)
+    # FUND4 missing gate (P0-4): seeds must clear the same gate the funnel applies —
+    # a partially-scored name is not a "top" name, it is an unscored one.
+    rows, n_miss = engine.drop_fund4_missing(rows, (selected or {}).keys())
+    if n_miss:
+        print(f"펀더 결측 {n_miss}종목 제외(결측-중립 함정) -> {len(rows)}", flush=True)
     # draft an ATR-based stop per row from the candidate's price history
     px_by_ticker = {c.ticker: c.prices for c in cands}
     for r in rows:

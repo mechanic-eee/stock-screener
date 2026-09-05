@@ -19,8 +19,11 @@ from .base import register
 def _apply(data: TickerData, p: dict) -> FilterOutcome:
     fb = data.fundamentals
     if fb is None or not fb.available:
-        return FilterOutcome(passed=True, detail="재무없음(중립)", value=50.0,
-                             score=50.0, available=False)
+        # value=None on purpose: the engine records `_values[key]` whenever value is
+        # not None, so a 50.0 here made the FUND4 missing gate blind to this filter
+        # (it could only ever report 3 of 4 missing) — P0-4, 2026-09-05.
+        return FilterOutcome(passed=True, detail="재무없음(미평가)", value=None,
+                             score=0.0, available=False)
 
     # Lethal flags = exchange-/audit-confirmed near-certain delisting: exclude
     # standalone, regardless of min_violations. Soft flags accumulate.
@@ -58,6 +61,12 @@ def _apply(data: TickerData, p: dict) -> FilterOutcome:
         detail += f" ⚠️{'/'.join(flags)}"
     detail += f" ({score:.0f})"
 
+    # Bundle present but none of the three inputs (rev YoY / margin / D/E) is
+    # evaluable: that is "unscored", not "neutral 50". Lethal exclusions still
+    # apply above regardless (a capital-impaired name with no P&L stays excluded).
+    if not excluded and not parts:
+        return FilterOutcome(passed=True, detail="재무 핵심항목 결측(미평가)", value=None,
+                             score=0.0, available=False)
     return FilterOutcome(passed=not excluded, detail=detail, value=score, score=score)
 
 

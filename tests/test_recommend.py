@@ -601,6 +601,50 @@ def test_heartbeat_only_after_send():
     print("  heartbeat: written only after send / catch-up label OK")
 
 
+def test_fund4_gate_shared_and_fundamental_unavailable():
+    """P0-4 (2026-09-05): one FUND4 gate definition for recommend / daily alert /
+    to_watchlist, gated only on selected keys; the fundamental filter reports
+    value=None when unavailable or unscorable so the gate can see it."""
+    import pandas as pd
+    from screener import engine
+    from screener.models import FundamentalsBundle, TickerData
+    from screener.filters import fundamental as ff
+
+    # helper: only selected FUND4 keys are required
+    r = _row("A", missing=("piotroski",))
+    assert engine.fund4_missing(r) == ["piotroski"]
+    assert engine.fund4_missing(r, ["fundamental", "altman_z"]) == []
+    kept, n = engine.drop_fund4_missing([_row("OK"), r], ["fundamental", "piotroski", "atr_risk"])
+    assert [x["ticker"] for x in kept] == ["OK"] and n == 1
+    kept, n = engine.drop_fund4_missing([_row("OK"), r], ["atr_risk"])   # no FUND4 selected -> no-op
+    assert len(kept) == 2 and n == 0
+
+    # recommend's gate now sees a missing `fundamental` (it never could before)
+    from recommend import apply_gates
+    kept, dropped = apply_gates([_row("NOFUND", missing=("fundamental",))])
+    assert not kept and "fundamental" in dropped[0][1]
+
+    # fundamental filter: unavailable bundle -> value None / available False
+    px = pd.DataFrame({"open": [1.0], "high": [1.0], "low": [1.0], "close": [1.0], "volume": [1]},
+                      index=pd.to_datetime(["2026-09-01"]))
+    params = {"drop_lethal": True, "min_violations": 2, "rev_yoy_floor": -30.0, "max_d2e": 300.0}
+    td = TickerData("X", "US", "x", px, fundamentals=FundamentalsBundle(available=False))
+    out = ff._apply(td, params)
+    assert out.value is None and out.available is False and out.passed
+    # available but all three inputs None -> unscored (not neutral 50)
+    td.fundamentals = FundamentalsBundle(available=True)
+    out = ff._apply(td, params)
+    assert out.value is None and out.available is False and out.passed
+    # lethal with no P&L inputs is still excluded
+    td.fundamentals = FundamentalsBundle(available=True, capital_impairment=True)
+    assert ff._apply(td, params).passed is False
+    # normal case unchanged
+    td.fundamentals = FundamentalsBundle(available=True, revenue_yoy=0.1, op_margin=0.1, debt_to_equity=1.0)
+    out = ff._apply(td, params)
+    assert out.available and out.value is not None and out.passed
+    print("  fund4 gate shared / fundamental unavailable=None OK")
+
+
 def main() -> int:
     test_gates()
     test_paper_cohorts()
@@ -620,6 +664,7 @@ def main() -> int:
     test_fundamentals_period_calendar()
     test_price_freshness_by_bar_date()
     test_heartbeat_only_after_send()
+    test_fund4_gate_shared_and_fundamental_unavailable()
     print("✅ test_recommend: all passed")
     return 0
 

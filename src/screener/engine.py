@@ -282,3 +282,30 @@ def apply_filters(
 
 def ensure_filters_loaded() -> None:
     filters_pkg.base.load_all()
+
+
+# The four validated fundamentals signals. A row missing any of them must not be
+# ranked as if it were merely neutral: the engine drops unavailable filters from
+# the weighted sum, so a name with one signal present re-normalizes to ~100 on
+# base+ATR (the "결측-중립 함정"). recommend.py has gated on this since 07-17;
+# the daily alert and to_watchlist did not (시스템-평가 2026-09-05 P0-4).
+FUND4 = ("fundamental", "altman_z", "piotroski", "gross_profit")
+
+
+def fund4_missing(row: dict, required=None) -> list[str]:
+    """Keys of `required` (default FUND4) absent from row['_values'].
+
+    Pass `required` = the FUND4 keys that were actually selected for this ranking,
+    so a base-only or partial ranking is not gated on signals it never computed."""
+    vals = row.get("_values") or {}
+    return [k for k in (required if required is not None else FUND4) if k not in vals]
+
+
+def drop_fund4_missing(rows: list[dict], selected_keys) -> tuple[list[dict], int]:
+    """(kept, n_dropped) after the FUND4 missing gate, gated only on the FUND4 keys
+    present in `selected_keys` (no-op when none of them were selected)."""
+    req = [k for k in FUND4 if k in set(selected_keys or ())]
+    if not req:
+        return list(rows), 0
+    kept = [r for r in rows if not fund4_missing(r, req)]
+    return kept, len(rows) - len(kept)

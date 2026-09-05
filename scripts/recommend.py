@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import position_size as ps  # noqa: E402
 import to_watchlist as twl  # noqa: E402  (reuse _attach_atr + DEFAULT_SNAPSHOT)
+from screener.engine import FUND4, fund4_missing  # noqa: E402  (단일 정의 — 일일 알림과 동일 게이트)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -50,7 +51,7 @@ EXPORTS = ROOT / "exports"
 # 일일 알림·to_watchlist 기본과 동일한 검증 세트 (설계 §1 단계 1의 랭킹 기반)
 ALERT_SET = ["fundamental", "valuation", "altman_z", "piotroski",
              "gross_profit", "atr_risk"]
-FUND4 = ("fundamental", "altman_z", "piotroski", "gross_profit")
+# FUND4는 screener.engine에서 가져온다(일일 알림·to_watchlist와 같은 정의).
 
 # 왕복 거래비용 가정치 [재량 — 정보 표시용]: KR 매도 거래세 ~0.15% + 슬리피지
 # 편도 ~0.15%×2, US는 SEC fee 미미하나 **한국 거주자 해외주식 양도세 22%**(연
@@ -84,7 +85,7 @@ def apply_gates(rows: list[dict], atr_max: float = 8.0,
     kept, dropped = [], []
     for r in rows:
         vals = r.get("_values") or {}
-        miss = [k for k in FUND4 if k not in vals]
+        miss = fund4_missing(r)
         if miss:
             dropped.append((r, f"펀더 결측 {len(miss)}건({','.join(miss)}) — 결측-중립 함정"))
             continue

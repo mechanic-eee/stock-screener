@@ -218,6 +218,13 @@ def main() -> int:
     if len(rows) != n_pre:
         print(f"alert types {'/'.join(args.alert_types)}: {n_pre} -> {len(rows)}", flush=True)
 
+    # FUND4 missing gate (P0-4): the same "결측=탈락" recommend.py applies. Without it
+    # a name with 3 of 4 signals missing re-normalized to 87 and went to the phone
+    # as "상위" (MCHB, 2026-09-05 export). Gated only on the FUND4 keys selected.
+    rows, n_miss = engine.drop_fund4_missing(rows, alert_selected.keys())
+    if n_miss:
+        print(f"alert fund4 gate: 결측 {n_miss} 제외 -> {len(rows)}", flush=True)
+
     # cooldown: drop tickers alerted recently unless their score jumped (PRD §5.6)
     suppressed = []
     if args.no_cooldown:
@@ -233,6 +240,8 @@ def main() -> int:
 
     top = ranked[: args.top]
     header = f"\U0001F4C9 폭락주 스캔 ({'+'.join(args.markets)}, -{args.min_drop}%) — 후보 {len(rows)}종목"
+    if n_miss:
+        header += f" (펀더 결측 {n_miss} 제외)"
     if suppressed:
         header += f" (쿨다운 {len(suppressed)} 제외)"
     # health line: a 'succeeded-but-degraded' run (e.g. new signals 7% filled) is
