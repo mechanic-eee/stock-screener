@@ -1,5 +1,7 @@
 # LOG — stock-screener
 
+## [2026-09-06] stock-screener | work | 고도화 실험 2건(point-in-time 패널): ①보유·회전·레짐청산 — 보유 중 레짐 청산 두 시장 기각(KR −4~−5%p·US −8~−12%p), 회전 KR만 +11%p/년(t2.0)·US 미복제, 진입 레짐 게이트 KR +4.4%p 지지 ②폭락 유형 신호 9개 — drop5_max120 두 시장 복제(t −4)되나 ATR 잔차 0(흡수), 유형 버킷 불일치, off_lows KR 잔차 유의. ★부수 발견: KR 패널 28날짜 중 17개가 상폐-only 코호트 → 클린 11날짜 IC 유지(t 4.4~6.4)·상위10 엣지 +2.0/+1.6/−3.8%p로 하향, 상위 50~80 바스켓 t 2.4~4.3·하위 10% −5~−7%p = 엣지는 '피하기+넓은 바스켓'. 정오표 3건 삽입, 10/10 안건 ④~⑦ 등재.
+
 ## [2026-09-06] stock-screener | feat | 평가 P1 4건 완료: ①review._account_heat(오픈리스크/총자산, 손절없음=전액, block_new→account_state.json→recommend 헤더 ⛔) ②monitor 페이퍼 손절 자동집행(_breach_exit: 손절 유효일 이후 첫 이탈 봉→다음 봉 종가, decide.close_position 전 트랜치+트레일러+jsonl; 라이브 dry-run 소급 이탈 0) ③decide --action 판정/트레일러/decisions.jsonl + CONTROL.md 대조군 26건 소급(결정일 종가 조회)+track 판정별 사후 성과(채택·페이퍼 n=11 -0.8% vs 대조군 n=26 -1.3%, 베토·funnel +4.7%) ④compliance.py+planned_events.json 36건 복원(정시율 52%/집행률 88%/평균 지연 12.8일)+review 기한경과·임박 줄. 부수: portfolio.json 현금 재구성, paper/real 동일 티커 분리 추적. 테스트 19→23.
 
 ## [2026-09-05] stock-screener | fix | 평가 P0 4건 완료·push(83a2a41→83ecfe8): ①fundamentals KR 보고서 후보 공시캘린더 순+기대분기 캐시 재조회+_SCHEMA_CUTOFF 상향(전량 재조회)+번들/사이드카/health/알림/recommend 펀더 as-of, KR 4Q lethal US 전용화 ②track._current_quote 봉날짜 vs 시장세션(>2영업일=시세 정지 None)+PRICE_MAX_AGE_DAYS 0.5 단일 ③review 하트비트 파일(전송 성공 후)+HEALTHCHECK_URL 핑+watchdog 판정 전환(-DryRun)+전송실패 exit 2+daily.ps1 review 선실행·UTF-8+WakeToRun 재등록(실검증: 실전송→하트비트→watchdog OK) ④engine.FUND4 공용 게이트를 daily_scan 알림·to_watchlist에 적용+fundamental 미가용 value=None. 테스트 15→19, CI 대기.
