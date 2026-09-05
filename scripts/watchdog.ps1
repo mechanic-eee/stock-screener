@@ -14,12 +14,19 @@
 # So: pre-noon runs verify YESTERDAY, and weekends roll back to Friday.
 # ASCII-only on purpose (PS 5.1 safe without BOM).
 #
+# Evidence (2026-09-05 P0-3): the transcript is written BEFORE python runs, so
+# "log touched today" only proved pwsh started. Now the primary evidence is
+# data\last_heartbeat.json, which review.py writes ONLY after Telegram accepted
+# the message. The transcript is kept as a secondary hint for triage.
+#
 #   powershell -File scripts\watchdog.ps1          # check now
-param([switch]$Quiet)
+#   powershell -File scripts\watchdog.ps1 -DryRun  # decide, print, never send
+param([switch]$Quiet, [switch]$DryRun)
 
 $ErrorActionPreference = "Continue"
 
 $log = Join-Path $PSScriptRoot "..\..\stock-investing\monitor-log.txt"
+$hb = Join-Path $PSScriptRoot "..\data\last_heartbeat.json"
 $envFile = Join-Path $PSScriptRoot "..\.env"
 $selfLog = Join-Path $PSScriptRoot "..\..\stock-investing\watchdog-log.txt"
 
@@ -44,15 +51,30 @@ while ($target.DayOfWeek -eq "Saturday" -or $target.DayOfWeek -eq "Sunday") {
     $target = $target.AddDays(-1)
 }
 
-$ok = (Test-Path $log) -and ((Get-Item $log).LastWriteTime.Date -ge $target)
+# Primary: heartbeat date (ISO yyyy-MM-dd, string-comparable) on/after target.
+$hbDate = $null
+if (Test-Path $hb) {
+    try { $hbDate = (Get-Content $hb -Raw | ConvertFrom-Json).date } catch { $hbDate = $null }
+}
+$targetStr = $target.ToString('yyyy-MM-dd')
+$ok = ($hbDate -ne $null) -and ([string]$hbDate -ge $targetStr)
 if ($ok) {
-    if (-not $Quiet) { Write-Host "watchdog: OK (log covers $($target.ToString('yyyy-MM-dd')))" }
-    Write-SelfLog "OK target=$($target.ToString('yyyy-MM-dd'))"
+    if (-not $Quiet) { Write-Host "watchdog: OK (heartbeat $hbDate covers $targetStr)" }
+    Write-SelfLog "OK target=$targetStr heartbeat=$hbDate"
     exit 0
 }
 
-$msg = "[watchdog] daily review left no trace for $($target.ToString('yyyy-MM-dd')) - the 08:10 task may be dead. " +
-       "Check: Get-ScheduledTask StockScreener-DailyReview / monitor-log.txt / register-daily-task.ps1"
+# Secondary hint for triage: did daily.ps1 start at all that day?
+$started = (Test-Path $log) -and ((Get-Item $log).LastWriteTime.Date -ge $target)
+$why = if ($started) { "daily.ps1 STARTED but no successful Telegram send was recorded (venv/token/timeout?)" }
+       else { "daily.ps1 never started (task disabled, PC off/asleep, shell path?)" }
+$msg = "[watchdog] no heartbeat for $targetStr - $why " +
+       "Check: Get-ScheduledTask StockScreener-DailyReview / data\last_heartbeat.json / monitor-log.txt"
+if ($DryRun) {
+    Write-Host "watchdog(dry-run): would ALERT - $msg"
+    Write-SelfLog "DRYRUN-alert target=$targetStr heartbeat=$hbDate started=$started"
+    exit 1
+}
 
 # Parse TELEGRAM_* straight from .env (no python dependency). Trim spaces,
 # then quotes, then spaces again ('" abc "' cases - audit F5).

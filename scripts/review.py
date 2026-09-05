@@ -45,6 +45,9 @@ HOLDINGS = ROOT / "data" / "holdings.json"
 # review 전용 EDGAR seen — monitor와 파일을 공유하면 먼저 도는 monitor가 신규
 # accession을 소비해 review가 '이미 본 것'으로 걸러버린다(감사 finding 1/22).
 _SEEN_PATH = ROOT / "data" / "review_edgar_seen.json"
+# 일일 맥박의 증거. '전송 성공' 직후에만 쓴다 — 워치독은 트랜스크립트(파이썬 실행 전에
+# 이미 생김)가 아니라 이 파일로 "폰에 도착했다"를 판정한다(시스템-평가 2026-09-05 P0-3).
+_HEARTBEAT_PATH = ROOT / "data" / "last_heartbeat.json"
 
 
 def _send(text: str) -> bool:
@@ -54,6 +57,39 @@ def _send(text: str) -> bool:
         return bool(send_message(text))
     except Exception:  # noqa: BLE001
         return False
+
+
+def _send_heartbeat(text: str, kind: str = "review") -> bool:
+    """텔레그램 전송 + **성공 시에만** last_heartbeat.json 기록 + 외부 dead-man 핑(선택).
+
+    실패는 기록하지 않는다 — '보냈다'와 '보내려 했다'를 구분하는 것이 이 파일의 존재
+    이유다. HEALTHCHECK_URL(.env, 예: healthchecks.io)이 있으면 성공 후 GET 1회:
+    PC가 꺼져 로컬 워치독까지 함께 죽는 날을 바깥에서 잡는 유일한 경로."""
+    ok = _send(text)
+    if not ok:
+        return False
+    now = dt.datetime.now()
+    try:
+        _atomic_write_json(_HEARTBEAT_PATH, {"date": now.date().isoformat(),
+                                             "time": now.strftime("%H:%M:%S"), "kind": kind})
+    except Exception:  # noqa: BLE001
+        pass
+    url = os.getenv("HEALTHCHECK_URL", "").strip()
+    if url:
+        try:
+            import requests
+            requests.get(url, timeout=10)
+        except Exception:  # noqa: BLE001
+            pass
+    return True
+
+
+def _run_label(today: dt.date, now: "dt.datetime | None" = None) -> str:
+    """'2026-09-05 08:10' — 정규 시각(07~09시) 밖이면 '(catch-up)'을 붙여 13:00 재가동이나
+    새벽 catch-up 실행이 08:10 정규 실행과 똑같이 읽히지 않게 한다."""
+    now = now or dt.datetime.now()
+    tag = "" if 7 <= now.hour <= 9 else " · catch-up"
+    return f"{today.isoformat()} {now:%H:%M}{tag}"
 
 
 def _atomic_write_json(path: Path, obj) -> None:
@@ -234,7 +270,7 @@ def _theme_concentration(rows: list[dict], themes: dict) -> list[tuple[bool, str
     return out
 
 
-def _run(holdings, themes, fx, today, args, watch=None) -> None:
+def _run(holdings, themes, fx, today, args, watch=None) -> "bool | None":
     """본체 — main()의 try 안에서 호출(예외는 main이 폴백 핑으로 처리)."""
     watch = watch or []
     ranks = None if args.no_rank else _rank_map(holdings)
@@ -328,11 +364,12 @@ def _run(holdings, themes, fx, today, args, watch=None) -> None:
 
     # 텔레그램 요약: 조치 필요(🔴/🟠/⚪) + 계획된 추가 + 테마 초과.
     # system:true(NVO 등)는 monitor가 알림 소유 → 이중 전송 방지 위해 제외(finding 3).
+    sent = None  # None=전송 안 함(콘솔 실행) / True·False=전송 결과
     if args.telegram:
         act = [r for r in rows if r["tag"].startswith(("🔴", "🟠", "⚪")) and not r["h"].get("system")]
         adds = [a for r in rows if not r["h"].get("system") for a in r["adds"]]
         over = [line for o, line in tconc if o]
-        msg = [f"📋 보유 규율 점검 ({today.isoformat()}) · {len(holdings)}종목"]
+        msg = [f"📋 보유 규율 점검 ({_run_label(today)}) · {len(holdings)}종목"]
         if act:
             for r in sorted(act, key=lambda x: order.get(x["tag"], 9)):
                 h = r["h"]
@@ -348,7 +385,8 @@ def _run(holdings, themes, fx, today, args, watch=None) -> None:
             msg.append("⚠️ 테마 초과: " + " · ".join(over))
         if not act and not adds and not over and not hits:
             msg.append("🟢 개인 보유 규칙 이상 없음 · 조치 불필요")
-        print("\n(텔레그램 전송됨)" if _send("\n".join(msg)) else "\n(⚠️ 텔레그램 전송 실패)")
+        sent = _send_heartbeat("\n".join(msg))
+        print("\n(텔레그램 전송됨 · 하트비트 기록)" if sent else "\n(⚠️ 텔레그램 전송 실패 — 하트비트 미기록)")
 
     if not args.no_edgar:
         try:
@@ -356,6 +394,7 @@ def _run(holdings, themes, fx, today, args, watch=None) -> None:
             _atomic_write_json(_SEEN_PATH, edgar_seen)
         except Exception:  # noqa: BLE001
             pass
+    return sent
 
 
 def main() -> int:
@@ -376,8 +415,8 @@ def main() -> int:
     if not path.exists():
         msg = f"⚪ 규율 점검 스킵 — holdings.json 없음 ({path.name})"
         print(msg)
-        if args.telegram:
-            _send(msg)
+        if args.telegram and not _send_heartbeat(msg):
+            return 2
         return 0
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -385,14 +424,14 @@ def main() -> int:
         msg = f"⚠️ 규율 점검 실패 — holdings.json 파싱 오류: {e}"
         print(msg)
         if args.telegram:
-            _send(msg)
+            _send_heartbeat(msg)
         return 1
     holdings = data.get("holdings", [])
     if not holdings:
         msg = "⚪ 규율 점검 — holdings.json에 종목 없음"
         print(msg)
-        if args.telegram:
-            _send(msg)
+        if args.telegram and not _send_heartbeat(msg):
+            return 2
         return 0
 
     raw = data.get("usdkrw")   # null/0/비숫자 방어(finding 6)
@@ -406,13 +445,17 @@ def main() -> int:
 
     print(f"보유 {len(holdings)}종목 규율 점검 — 현재가/위험/랭킹 조회 중...", flush=True)
     try:
-        _run(holdings, themes, fx, today, args, watch=data.get("watch", []))
+        sent = _run(holdings, themes, fx, today, args, watch=data.get("watch", []))
     except Exception as e:  # noqa: BLE001 — 어떤 예외에도 하트비트는 나간다
         msg = f"⚠️ review 실패: {e}"
         print(msg)
         if args.telegram:
-            _send(msg)
+            _send_heartbeat(msg)
         return 1
+    # 전송 실패는 더 이상 exit 0이 아니다 — daily.ps1의 $fail → Task Scheduler
+    # 'Last Run Result' ≠ 0, 그리고 하트비트 파일이 안 쓰여 워치독이 경보한다(P0-3).
+    if sent is False:
+        return 2
     return 0
 
 

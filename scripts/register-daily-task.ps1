@@ -37,10 +37,13 @@ if (-not (Test-Path $shell)) { $shell = Join-Path $env:SystemRoot "System32\Wind
 $action = New-ScheduledTaskAction -Execute $shell -Argument (
     "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$daily`" -Telegram")
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At $Time
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
+# -WakeToRun: 4 of 20 weekdays (8/10~9/4) had no 08:10 run because the PC was
+# asleep; catch-up then fired at 01:10 the next day. Wake works from sleep
+# (not from shutdown) - the external HEALTHCHECK_URL ping covers the rest.
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
     -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Settings $settings -Description "Stock screener daily review: track + monitor (thesis-break telegram)" -Force | Out-Null
-Write-Host "registered: $TaskName (weekdays $Time, catch-up on wake, telegram on)"
+Write-Host "registered: $TaskName (weekdays $Time, wake-to-run + catch-up, telegram on)"
 Write-Host "log: ..\stock-investing\monitor-log.txt  |  remove: -Unregister"

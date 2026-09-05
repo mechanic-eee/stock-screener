@@ -349,6 +349,7 @@ def main() -> int:
             if d_left <= 3:
                 alerts.append(f"🗓 {lbl} D-{d_left} ({ev.strftime('%m/%d')})")
 
+    send_failed = False  # 알림 전송 실패는 exit 2로 표면화(P0-3) — '실패해도 0'은 워치독을 속인다
     if alerts:
         print(f"\n⚠️ thesis-break 알림 {len(alerts)}건 — 청산/재검토 후보:")
         for a in alerts:
@@ -358,8 +359,10 @@ def main() -> int:
                 from screener.notify.telegram import send_message
                 ok = send_message("🚨 보유종목 thesis-break\n" + "\n".join(alerts))
                 print("  (텔레그램 전송됨)" if ok else "  (⚠️ 텔레그램 전송 실패 — 위 알림을 직접 확인하세요)")
+                send_failed = not ok
             except Exception as e:  # noqa: BLE001
                 print(f"  (텔레그램 전송 실패: {e})")
+                send_failed = True
     else:
         print("\n✅ 보유종목 전부 정상 — 손절/위험공시 이상 없음.")
 
@@ -408,7 +411,7 @@ def main() -> int:
             _EDGAR_SEEN_PATH.write_text(_json.dumps(edgar_seen), encoding="utf-8")
         except Exception:  # noqa: BLE001
             pass
-    return 0
+    return 2 if send_failed else 0
 
 
 if __name__ == "__main__":

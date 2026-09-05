@@ -573,6 +573,34 @@ def test_price_freshness_by_bar_date():
     print("  price freshness: bar-date vs market session / reason / single max-age OK")
 
 
+def test_heartbeat_only_after_send():
+    """P0-3 (2026-09-05): the heartbeat file exists only when Telegram accepted the
+    message; a failed send leaves no heartbeat (so the watchdog alerts) and the
+    run label marks off-hours executions as catch-up."""
+    import datetime as dt
+    import json
+    import review
+
+    tmp = Path(tempfile.mkdtemp()) / "hb.json"
+    orig_path, orig_send = review._HEARTBEAT_PATH, review._send
+    review._HEARTBEAT_PATH = tmp
+    try:
+        review._send = lambda text: False
+        assert review._send_heartbeat("x") is False and not tmp.exists()
+        review._send = lambda text: True
+        assert review._send_heartbeat("x", kind="test") is True and tmp.exists()
+        d = json.loads(tmp.read_text(encoding="utf-8"))
+        assert d["date"] == dt.date.today().isoformat() and d["kind"] == "test"
+    finally:
+        review._HEARTBEAT_PATH, review._send = orig_path, orig_send
+
+    lab = review._run_label(date(2026, 9, 7), dt.datetime(2026, 9, 7, 8, 10))
+    assert lab == "2026-09-07 08:10"
+    lab = review._run_label(date(2026, 9, 7), dt.datetime(2026, 9, 7, 13, 2))
+    assert lab.endswith("catch-up")
+    print("  heartbeat: written only after send / catch-up label OK")
+
+
 def main() -> int:
     test_gates()
     test_paper_cohorts()
@@ -591,6 +619,7 @@ def main() -> int:
     test_biz_days_behind()
     test_fundamentals_period_calendar()
     test_price_freshness_by_bar_date()
+    test_heartbeat_only_after_send()
     print("✅ test_recommend: all passed")
     return 0
 
