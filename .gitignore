@@ -24,6 +24,7 @@ data/realized_ledger.json
 data/edgar_seen.json
 data/review_edgar_seen.json
 data/last_heartbeat.json
+data/account_state.json
 data/valuations.parquet
 data/fundamentals.parquet
 exports/

@@ -117,6 +117,24 @@ def apply_gates(rows: list[dict], atr_max: float = 8.0,
 # --------------------------------------------------------------------------- #
 # 데이터 로드 · 부착
 # --------------------------------------------------------------------------- #
+def _account_block_note() -> str:
+    """review.py가 쓴 data/account_state.json의 신규 차단 플래그(3일 이내 것만) —
+    '⛔ 실계좌 신규 진입 차단 중' 을 계좌 가정 줄에 붙인다. 없거나 낡으면 빈 문자열."""
+    try:
+        import json as _json
+        pth = ps.PORTFOLIO.parent / "account_state.json"
+        st = _json.loads(pth.read_text(encoding="utf-8"))
+        d = date.fromisoformat(st.get("date", "1970-01-01"))
+        if (date.today() - d).days > 3:
+            return " · ⚪ 계좌 히트 상태 낡음(review 3일+ 미실행)"
+        if st.get("block_new"):
+            return (f" · ⛔ 실계좌 신규 진입 차단 중({' / '.join(st.get('reasons') or [])}) — "
+                    "이번 픽은 페이퍼만, 실계좌는 축소 후")
+        return f" · 계좌 히트 {st.get('heat_pct')}%/{st.get('cap_pct'):.0f}% · 보유 {st.get('n_positions')}/{st.get('max_positions')}"
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _fund_asof_line(source: str) -> str:
     """'펀더 기준: KR 2026-06-30(중앙값) · US 2026-06-30' — 시세 기준일 옆에 나란히.
     사이드카가 period 열을 갖기 전(2026-09 이전)이면 빈 문자열."""
@@ -469,6 +487,7 @@ def main() -> int:
     acct_line = (f"계좌 가정: KR ₩{cfg['account_krw']:,.0f} · US ${cfg['account_usd']:,.0f} · "
                  f"R {args.risk:.1f}% ({cfg.get('_source', 'data/portfolio.json')}) — "
                  "실계좌와 다르면 수량·비중은 예시일 뿐")
+    acct_line += _account_block_note()
     print(f"\n시세 기준일: {asof} 종가{stale_note} — 진입·손절·수량 초안의 기준, "
           "주문 전 현재가로 재계산" if asof else "\n⚠️ 시세 기준일 산출 불가")
     if fund_line:

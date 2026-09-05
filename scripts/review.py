@@ -48,6 +48,13 @@ _SEEN_PATH = ROOT / "data" / "review_edgar_seen.json"
 # 일일 맥박의 증거. '전송 성공' 직후에만 쓴다 — 워치독은 트랜스크립트(파이썬 실행 전에
 # 이미 생김)가 아니라 이 파일로 "폰에 도착했다"를 판정한다(시스템-평가 2026-09-05 P0-3).
 _HEARTBEAT_PATH = ROOT / "data" / "last_heartbeat.json"
+# 계좌 수준 상태(히트·보유수·신규 차단) — recommend.py가 읽어 체크리스트 헤더에 표시.
+_STATE_PATH = ROOT / "data" / "account_state.json"
+# 설계 §1 단계6 [재량]: 총 오픈리스크 Σ(가격−손절)×수량 ≤ 계좌 6%, 동시 보유 ≤ 6종.
+# 지금까지 어느 스크립트도 계산하지 않았다 — 시스템 픽 R1% 옆에 레거시 10R가 앉아 있어도
+# 매일 "테마 경고"만 찍혔다(시스템-평가 2026-09-05 P1).
+HEAT_CAP_PCT = 6.0
+MAX_POSITIONS = 6
 
 
 def _send(text: str) -> bool:
@@ -245,6 +252,62 @@ def _rank_map(holdings: list[dict]):
         return None
 
 
+def _account_heat(rows: list[dict], fx: float, cash_krw=0.0, cash_usd=0.0,
+                  cap_pct: float = HEAT_CAP_PCT, max_pos: int = MAX_POSITIONS) -> tuple[dict, str]:
+    """(state, line) — 계좌 히트 = Σ max(0, 가격−손절)×수량 / 총자산(보유 평가 + 현금), USD 환산.
+
+    손절선이 없는 종목은 평가액 전부를 오픈리스크로 센다(손절 없음 = 전액이 리스크).
+    가격 조회 실패 종목은 분모·분자 모두에서 빠지고 state["skipped"]에 남는다.
+    block_new = 히트 > 한도 또는 보유수 ≥ 상한 → 신규 실계좌 진입 차단 플래그."""
+    total = risk = 0.0
+    n = 0
+    per: list[tuple[float, str]] = []
+    skipped: list[str] = []
+    for r in rows:
+        h = r["h"]
+        price, sh = r.get("price"), (h.get("shares") or 0)
+        if not price or sh <= 0:
+            if sh > 0:
+                skipped.append(h.get("ticker", "?"))
+            continue
+        n += 1
+        conv = (1.0 / fx) if h.get("market") == "KR" else 1.0
+        val = price * sh * conv
+        total += val
+        try:
+            stop = float(h.get("stop")) if h.get("stop") else None
+        except (TypeError, ValueError):
+            stop = None
+        orisk = max(0.0, price - stop) * sh * conv if (stop and stop > 0) else val
+        risk += orisk
+        per.append((orisk, h.get("ticker", "?")))
+    total += float(cash_krw or 0) / fx + float(cash_usd or 0)
+    heat = (risk / total * 100.0) if total > 0 else None
+    reasons = []
+    if heat is not None and heat > cap_pct:
+        reasons.append(f"히트 {heat:.1f}% > {cap_pct:.0f}%")
+    if n >= max_pos:
+        reasons.append(f"보유 {n} ≥ {max_pos}")
+    worst = max(per) if per else None
+    state = {"date": dt.date.today().isoformat(),
+             "heat_pct": None if heat is None else round(heat, 2), "cap_pct": cap_pct,
+             "n_positions": n, "max_positions": max_pos,
+             "total_usd": round(total), "open_risk_usd": round(risk),
+             "worst": {"ticker": worst[1], "open_risk_usd": round(worst[0])} if worst else None,
+             "block_new": bool(reasons), "reasons": reasons, "skipped": skipped}
+    if heat is None:
+        line = "🔥 계좌 히트 산출 불가(가격 없음)"
+    else:
+        line = (f"🔥 계좌 히트 {heat:.1f}% (한도 {cap_pct:.0f}%) · 오픈리스크 ${risk:,.0f} / 총자산 ${total:,.0f}"
+                f" · 보유 {n}/{max_pos}")
+        if worst:
+            line += f" · 최대 {worst[1]} ${worst[0]:,.0f}"
+        line += (" → ⛔ 신규 실계좌 진입 차단" if reasons else " · 신규 여력 있음")
+        if skipped:
+            line += f" (제외: {','.join(skipped)})"
+    return state, line
+
+
 def _theme_concentration(rows: list[dict], themes: dict) -> list[tuple[bool, str]]:
     """테마별 평가액 비중 vs comfort_max_pct — 낸드 47% 같은 집중을 매일 표면에.
     rows의 value_usd는 이미 USD 환산됨(main에서). 반환 [(over, 라인)]."""
@@ -332,6 +395,19 @@ def _run(holdings, themes, fx, today, args, watch=None) -> "bool | None":
         for _over, line in tconc:
             print("  · " + line)
 
+    # 계좌 히트·보유수 — 설계 §1 단계6의 첫 자동 계산(P1). 현금은 portfolio.json.
+    try:
+        import position_size as _ps
+        _cfg = _ps._load_portfolio()
+    except Exception:  # noqa: BLE001
+        _cfg = {}
+    hstate, hline = _account_heat(rows, fx, _cfg.get("cash_krw", 0), _cfg.get("cash_usd", 0))
+    print("\n" + hline)
+    try:
+        _atomic_write_json(_STATE_PATH, hstate)
+    except Exception:  # noqa: BLE001
+        pass
+
     # 워치(재진입 트리거·재상정일) — 보유 아님, 조건 도달 시에만 알림.
     # 가격은 보유 조회분 재사용, 비보유 티커(예: 청산 후 NVO)는 별도 조회.
     price_by_tkr = {r["h"]["ticker"]: r["price"] for r in rows}
@@ -383,7 +459,8 @@ def _run(holdings, themes, fx, today, args, watch=None) -> "bool | None":
             msg += hits
         if over:
             msg.append("⚠️ 테마 초과: " + " · ".join(over))
-        if not act and not adds and not over and not hits:
+        msg.append(hline)
+        if not act and not adds and not over and not hits and not hstate.get("block_new"):
             msg.append("🟢 개인 보유 규칙 이상 없음 · 조치 불필요")
         sent = _send_heartbeat("\n".join(msg))
         print("\n(텔레그램 전송됨 · 하트비트 기록)" if sent else "\n(⚠️ 텔레그램 전송 실패 — 하트비트 미기록)")

@@ -645,6 +645,39 @@ def test_fund4_gate_shared_and_fundamental_unavailable():
     print("  fund4 gate shared / fundamental unavailable=None OK")
 
 
+def test_account_heat():
+    """P1 (2026-09-06): portfolio heat = open risk / total assets in USD, no-stop
+    holdings count fully, missing prices are skipped, block flag on cap/count."""
+    import review
+
+    def row(tkr, mk, price, sh, stop):
+        return {"h": {"ticker": tkr, "market": mk, "shares": sh, "stop": stop}, "price": price}
+    fx = 1460.0
+    rows = [row("KRX", "KR", 62600.0, 130, 45000),   # (17,600×130)/1460 = $1,567 risk, $5,574 value
+            row("SNDK", "US", 1740.0, 1, 1465.0),      # $275 risk
+            row("NOSTOP", "US", 100.0, 10, None),      # no stop -> $1,000 risk (=value)
+            row("NOPX", "US", None, 5, 50.0)]          # skipped
+    st, line = review._account_heat(rows, fx, cash_krw=9431, cash_usd=4000.0)
+    total = 62600 * 130 / fx + 1740 + 1000 + 9431 / fx + 4000
+    risk = 17600 * 130 / fx + 275 + 1000
+    assert abs(st["total_usd"] - round(total)) <= 1 and abs(st["open_risk_usd"] - round(risk)) <= 1
+    assert abs(st["heat_pct"] - risk / total * 100) < 0.05
+    assert st["n_positions"] == 3 and st["skipped"] == ["NOPX"]
+    assert st["block_new"] is True and any("히트" in r for r in st["reasons"]) and "⛔" in line
+    assert st["worst"]["ticker"] == "KRX"
+
+    # small book -> no block; six positions -> block by count
+    st, line = review._account_heat([row("A", "US", 100.0, 1, 95.0)], fx, cash_usd=10_000.0)
+    assert st["block_new"] is False and "여력" in line
+    six = [row(f"T{i}", "US", 100.0, 1, 99.0) for i in range(6)]
+    st, _ = review._account_heat(six, fx, cash_usd=10_000.0)
+    assert st["block_new"] is True and any("보유 6" in r for r in st["reasons"])
+    # nothing priced -> no crash
+    st, line = review._account_heat([row("Z", "US", None, 1, 1.0)], fx)
+    assert st["heat_pct"] is None and "산출 불가" in line
+    print("  account heat: open-risk/total, no-stop=full, skip, block flags OK")
+
+
 def main() -> int:
     test_gates()
     test_paper_cohorts()
@@ -665,6 +698,7 @@ def main() -> int:
     test_price_freshness_by_bar_date()
     test_heartbeat_only_after_send()
     test_fund4_gate_shared_and_fundamental_unavailable()
+    test_account_heat()
     print("✅ test_recommend: all passed")
     return 0
 
