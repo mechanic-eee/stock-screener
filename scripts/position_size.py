@@ -26,7 +26,10 @@ except Exception:
     pass
 
 ROOT = Path(__file__).resolve().parents[1]
-PORTFOLIO = ROOT / "data" / "portfolio.json"
+# 개인 재무 JSON은 비공개 저장소 stock-investing/data/ 가 정본(2026-09-06 이관). 옛 위치는 폴백.
+INVESTING_DATA = ROOT.parent / "stock-investing" / "data"
+PORTFOLIO = (INVESTING_DATA / "portfolio.json") if (INVESTING_DATA / "portfolio.json").exists() \
+    else ROOT / "data" / "portfolio.json"
 # max_pos_pct 20→15: the ATR stop cannot cap a gap-down (-100% tail), so the
 # position weight is the real single-name catastrophe ceiling; low-ATR names
 # otherwise reach 20%+ on R 1% alone (recommendation-design-2026-07-17 §1.5).

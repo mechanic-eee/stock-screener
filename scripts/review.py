@@ -10,7 +10,7 @@ off_lows t-5.5). 대신 **내가 이미 정해둔 규칙이 오늘 걸렸는지*
   python scripts/review.py --telegram      # 요약을 텔레그램으로 (daily.ps1 08:10)
   python scripts/review.py --no-rank       # 스냅샷 랭킹 조회 생략(빠름)
 
-데이터: data/holdings.json (gitignore — 개인 재무데이터). monitor/track 헬퍼 재사용.
+데이터: ../stock-investing/data/holdings.json (비공개 저장소 정본; 옛 data/holdings.json 폴백). monitor/track 헬퍼 재사용.
 견고성(멀티에이전트 감사 2026-07-22 반영): 종목별 오류 격리·손상 입력에도
 --telegram이면 반드시 하트비트 1회 전송(monitor는 --no-heartbeat라 review가 유일한 맥박).
 """
@@ -41,7 +41,9 @@ except Exception:
     pass
 
 ROOT = Path(__file__).resolve().parents[1]
-HOLDINGS = ROOT / "data" / "holdings.json"
+INVESTING_DATA = ROOT.parent / "stock-investing" / "data"   # 비공개 저장소 — 개인 JSON 정본(2026-09-06)
+HOLDINGS = (INVESTING_DATA / "holdings.json") if (INVESTING_DATA / "holdings.json").exists() \
+    else ROOT / "data" / "holdings.json"
 # review 전용 EDGAR seen — monitor와 파일을 공유하면 먼저 도는 monitor가 신규
 # accession을 소비해 review가 '이미 본 것'으로 걸러버린다(감사 finding 1/22).
 _SEEN_PATH = ROOT / "data" / "review_edgar_seen.json"
@@ -49,7 +51,7 @@ _SEEN_PATH = ROOT / "data" / "review_edgar_seen.json"
 # 이미 생김)가 아니라 이 파일로 "폰에 도착했다"를 판정한다(시스템-평가 2026-09-05 P0-3).
 _HEARTBEAT_PATH = ROOT / "data" / "last_heartbeat.json"
 # 계좌 수준 상태(히트·보유수·신규 차단) — recommend.py가 읽어 체크리스트 헤더에 표시.
-_STATE_PATH = ROOT / "data" / "account_state.json"
+_STATE_PATH = HOLDINGS.parent / "account_state.json"   # holdings 옆(비공개 저장소) — recommend는 PORTFOLIO.parent로 읽음
 # 설계 §1 단계6 [재량]: 총 오픈리스크 Σ(가격−손절)×수량 ≤ 계좌 6%, 동시 보유 ≤ 6종.
 # 지금까지 어느 스크립트도 계산하지 않았다 — 시스템 픽 R1% 옆에 레거시 10R가 앉아 있어도
 # 매일 "테마 경고"만 찍혔다(시스템-평가 2026-09-05 P1).

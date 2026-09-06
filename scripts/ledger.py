@@ -7,7 +7,7 @@
   python scripts/ledger.py --fx 1460   # 환율 덮어쓰기
   python scripts/ledger.py --year 2026
 
-데이터: data/realized_ledger.json (gitignore — 개인 재무데이터). 매도 시 trades에 추가.
+데이터: ../stock-investing/data/realized_ledger.json (비공개 저장소 정본). 매도 시 trades에 추가.
 세제 단순화(정확 신고는 증권사 계산 기준):
 - 해외(US) 주식: 연간 손익 통산 → 기본공제 250만원 → 초과분 22% (지방세 포함).
   손실 이월 불가 — 이익 있는 해에 같이 실현해야 통산 가치가 있다.
@@ -27,7 +27,9 @@ except Exception:
     pass
 
 ROOT = Path(__file__).resolve().parents[1]
-LEDGER = ROOT / "data" / "realized_ledger.json"
+INVESTING_DATA = ROOT.parent / "stock-investing" / "data"   # 비공개 저장소 — 개인 JSON 정본(2026-09-06)
+LEDGER = (INVESTING_DATA / "realized_ledger.json") if (INVESTING_DATA / "realized_ledger.json").exists() \
+    else ROOT / "data" / "realized_ledger.json"
 EXEMPTION_KRW = 2_500_000
 TAX_RATE = 0.22
 
@@ -92,7 +94,7 @@ def main() -> int:
     fx = args.fx
     if fx is None:
         try:
-            hold = json.loads((ROOT / "data" / "holdings.json").read_text(encoding="utf-8"))
+            hold = json.loads((LEDGER.parent / "holdings.json").read_text(encoding="utf-8"))
             fx = float(hold.get("usdkrw") or 1460)
         except Exception:  # noqa: BLE001
             fx = 1460.0

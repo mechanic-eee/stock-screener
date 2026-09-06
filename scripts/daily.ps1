@@ -59,5 +59,18 @@ Write-Host " - Curate WATCHLIST 보류 rows (fill thesis/stop/catalyst, set 관�
 Write-Host " - Record buys/exits:  decide.py --ticker <T> [--action 청산 --exit <px>]"
 Write-Host " - Deploy when the index is above its 200DMA (see the daily alert 시장: line)."
 
+# Journal history: stock-investing is a PRIVATE git repo (2026-09-06). Snapshot the day
+# (TRACKING/DECISIONS/CONTROL/planned_events/account_state) so nothing is lost to a bad
+# hand edit or a crash. Best-effort: never fails the task, never blocks on prompts.
+$inv = Join-Path $PSScriptRoot "..\..\stock-investing"
+if (Test-Path (Join-Path $inv ".git")) {
+    try {
+        & git -C $inv add -A 2>&1 | Out-Null
+        & git -C $inv -c commit.gpgsign=false commit -q -m ("daily " + (Get-Date -Format "yyyy-MM-dd HH:mm")) 2>&1 | Out-Null
+        & git -C $inv push -q origin main 2>&1 | Out-Host
+        Write-Host "journal: committed + pushed (stock-investing)"
+    } catch { Write-Host "journal: git step failed - $_" }
+}
+
 try { Stop-Transcript | Out-Null } catch {}
 if ($fail -ne 0) { exit 1 }   # surface any step failure to Task Scheduler

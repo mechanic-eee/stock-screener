@@ -1,5 +1,7 @@
 # LOG — stock-screener
 
+## [2026-09-06] stock-screener | work | 개인 JSON 정본 이관: holdings·portfolio·realized_ledger·account_state → ../stock-investing/data/ (position_size.PORTFOLIO·review.HOLDINGS/_STATE_PATH·ledger.LEDGER 새 위치 우선, 옛 위치 폴백). daily.ps1 끝에 저널 자동 커밋·push. 문서 경로 갱신. 테스트·selftest·ledger·review 라이브 확인.
+
 ## [2026-09-06] stock-screener | feat | 선제 알림 장치: review 워치 tranche2(판정일 이후 종가≥level & 랭킹 상위25% → position_size로 2차 제안, 미달 소멸문)·rank_check(top N 유지 여부) + ctx(계좌·R·히트) / brief.py(자료팩 8종 → claude -p --allowedTools Read → reviews/ 저장 → 텔레그램, 실패도 통지, 계획이벤트 done) + brief.ps1 + register-brief-task.ps1(1회·WakeToRun). 9/12 09:00 paper8w 등록. holdings watch: NVO tranche2 9/9·AMN rank_check 9/9. 테스트 25.
 
 ## [2026-09-06] stock-screener | work | 사이클 #6 깔때기(US) 실행 — 통과 11·탈락 4(결측 게이트 첫 실전: MCHB·MKTX·LOB·BZ 제외). 데이터 오염 발견: US 분기 행 반기 혼입(AMN) → PLAN P2 등재. recommend 헤더 ⛔ 히트 차단 표기 첫 노출.
