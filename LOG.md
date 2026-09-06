@@ -1,5 +1,7 @@
 # LOG — stock-screener
 
+## [2026-09-06] stock-screener | work | 사이클 #6 깔때기(US) 실행 — 통과 11·탈락 4(결측 게이트 첫 실전: MCHB·MKTX·LOB·BZ 제외). 데이터 오염 발견: US 분기 행 반기 혼입(AMN) → PLAN P2 등재. recommend 헤더 ⛔ 히트 차단 표기 첫 노출.
+
 ## [2026-09-06] stock-screener | work | 고도화 실험 2건(point-in-time 패널): ①보유·회전·레짐청산 — 보유 중 레짐 청산 두 시장 기각(KR −4~−5%p·US −8~−12%p), 회전 KR만 +11%p/년(t2.0)·US 미복제, 진입 레짐 게이트 KR +4.4%p 지지 ②폭락 유형 신호 9개 — drop5_max120 두 시장 복제(t −4)되나 ATR 잔차 0(흡수), 유형 버킷 불일치, off_lows KR 잔차 유의. ★부수 발견: KR 패널 28날짜 중 17개가 상폐-only 코호트 → 클린 11날짜 IC 유지(t 4.4~6.4)·상위10 엣지 +2.0/+1.6/−3.8%p로 하향, 상위 50~80 바스켓 t 2.4~4.3·하위 10% −5~−7%p = 엣지는 '피하기+넓은 바스켓'. 정오표 3건 삽입, 10/10 안건 ④~⑦ 등재.
 
 ## [2026-09-06] stock-screener | feat | 평가 P1 4건 완료: ①review._account_heat(오픈리스크/총자산, 손절없음=전액, block_new→account_state.json→recommend 헤더 ⛔) ②monitor 페이퍼 손절 자동집행(_breach_exit: 손절 유효일 이후 첫 이탈 봉→다음 봉 종가, decide.close_position 전 트랜치+트레일러+jsonl; 라이브 dry-run 소급 이탈 0) ③decide --action 판정/트레일러/decisions.jsonl + CONTROL.md 대조군 26건 소급(결정일 종가 조회)+track 판정별 사후 성과(채택·페이퍼 n=11 -0.8% vs 대조군 n=26 -1.3%, 베토·funnel +4.7%) ④compliance.py+planned_events.json 36건 복원(정시율 52%/집행률 88%/평균 지연 12.8일)+review 기한경과·임박 줄. 부수: portfolio.json 현금 재구성, paper/real 동일 티커 분리 추적. 테스트 19→23.
