@@ -10,7 +10,13 @@
   "215000": "미상",
   "000080": "미상",
   "383220": "미상",
-  "003850": "미상"
+  "003850": "미상",
+  "010780": "미상",
+  "439090": "미상",
+  "099430": "미상",
+  "020000": "미상",
+  "049630": "미상",
+  "051160": "미상"
  },
  "US": {
   "NVO": "Healthcare",
@@ -24,6 +30,11 @@
   "DXCM": "Healthcare",
   "AMN": "Healthcare",
   "MNSO": "Consumer Cyclical",
-  "OTEX": "Technology"
+  "OTEX": "Technology",
+  "PAYC": "Technology",
+  "LXU": "Basic Materials",
+  "TBLA": "Communication Services",
+  "YALA": "Technology",
+  "DV": "Communication Services"
  }
 }

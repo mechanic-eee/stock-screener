@@ -99,7 +99,7 @@ def build_pack_paper8w(pack: Path, today: date) -> tuple[list[Path], str, Path, 
     # 결정 로그 최근 40개 불릿(최신 위) — 규칙 위반·재량의 증거
     bullets = [ln for ln in dtxt.splitlines() if ln.startswith("- [2026")][:40]
     put("05-DECISIONS-최근결정로그-40.md", "\n".join(bullets))
-    acct = ROOT / "data" / "account_state.json"
+    acct = INVESTING / "data" / "account_state.json"   # 정본 위치(2026-09-06 이관)
     put("06-계좌상태.json", acct.read_text(encoding="utf-8") if acct.exists() else "{}")
     design = ROOT / "docs" / "recommendation-design-2026-07-17.md"
     dtext = design.read_text(encoding="utf-8") if design.exists() else ""
@@ -146,7 +146,7 @@ def main() -> int:
     ap.add_argument("--model", default=MODEL)
     args = ap.parse_args()
     today = date.today()
-    pack = ROOT / "data" / "brief" / f"{args.kind}-{today.isoformat()}"
+    pack = INVESTING / "data" / "brief" / f"{args.kind}-{today.isoformat()}"   # 개인 추출물 → 비공개 저장소
     pack.mkdir(parents=True, exist_ok=True)
     files, prompt, out_path, done_id = KINDS[args.kind](pack, today)
     (pack / "prompt.txt").write_text(prompt, encoding="utf-8")

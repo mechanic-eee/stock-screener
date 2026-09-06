@@ -5,36 +5,25 @@ __pycache__/
 venv/
 *.egg-info/
 
-# secrets
+# secrets — never (the one hard line)
 .env
+.streamlit/secrets.toml
 
-# cached market data (rebuildable)
+# regenerable bulk caches (too big for GitHub: DB 1.4GB, EDGAR cache 5GB, DART cache 2.8k files)
 data/screener.db
 data/screener.db-wal
 data/screener.db-shm
-data/prices/
-data/universe.json
-data/candidates.parquet
-data/benchmarks.parquet
-data/dart_corp_map.json
-data/kr_admin_cache.json
+exports/edgar_cache/
+exports/dart_cache/
+
+# personal finance JSONs live in the PRIVATE stock-investing repo (2026-09-06) — keep them out of this public one
 data/portfolio.json
 data/holdings.json
 data/realized_ledger.json
-data/edgar_seen.json
-data/review_edgar_seen.json
-data/last_heartbeat.json
 data/account_state.json
-data/valuations.parquet
-data/fundamentals.parquet
-exports/
-
-# os / editor
-.DS_Store
-.streamlit/secrets.toml
-
-# transient scan logs
-*.log
-
-top20.txt
 data/brief/
+
+# os / editor / transient
+.DS_Store
+*.log
+top20.txt

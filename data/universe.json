@@ -1,0 +1,77 @@
+[
+  {
+    "ticker": "AAPL",
+    "name": "Apple",
+    "market": "US"
+  },
+  {
+    "ticker": "MSFT",
+    "name": "Microsoft",
+    "market": "US"
+  },
+  {
+    "ticker": "NVDA",
+    "name": "NVIDIA",
+    "market": "US"
+  },
+  {
+    "ticker": "AMZN",
+    "name": "Amazon",
+    "market": "US"
+  },
+  {
+    "ticker": "GOOGL",
+    "name": "Alphabet",
+    "market": "US"
+  },
+  {
+    "ticker": "META",
+    "name": "Meta",
+    "market": "US"
+  },
+  {
+    "ticker": "TSLA",
+    "name": "Tesla",
+    "market": "US"
+  },
+  {
+    "ticker": "INTC",
+    "name": "Intel",
+    "market": "US"
+  },
+  {
+    "ticker": "PYPL",
+    "name": "PayPal",
+    "market": "US"
+  },
+  {
+    "ticker": "DIS",
+    "name": "Walt Disney",
+    "market": "US"
+  },
+  {
+    "ticker": "BA",
+    "name": "Boeing",
+    "market": "US"
+  },
+  {
+    "ticker": "PFE",
+    "name": "Pfizer",
+    "market": "US"
+  },
+  {
+    "ticker": "KO",
+    "name": "Coca-Cola",
+    "market": "US"
+  },
+  {
+    "ticker": "NKE",
+    "name": "Nike",
+    "market": "US"
+  },
+  {
+    "ticker": "F",
+    "name": "Ford",
+    "market": "US"
+  }
+]
