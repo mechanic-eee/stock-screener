@@ -833,6 +833,32 @@ def test_compliance_summary():
     print("  compliance: rates/judge/overdue/upcoming OK")
 
 
+def test_watch_tranche2_and_rank_check():
+    """2026-09-06: tranche2 judges price+rank on/after the date and drafts R-sized 2nd
+    tranche; rank_check reports top-N retention. Before the date both stay silent."""
+    import review
+    w = {"ticker": "NVO", "market": "US", "type": "tranche2", "date": "2026-09-09", "level": 47.59,
+         "stop": 43.10, "shares_1st": 20, "note": "n"}
+    ctx = {"rank": (3, 15), "account": 9810.0, "risk": 1.0, "max_pos": 15.0, "block_new": True}
+    assert review._watch_verdict(w, 48.0, date(2026, 9, 8), ctx) is None            # before date
+    m = review._watch_verdict(w, 48.0, date(2026, 9, 9), ctx)
+    assert m.startswith("✅ NVO 2차 트랜치 조건 충족") and "제안 2차" in m and "⛔" in m
+    # R1% on $9,810 with stop 43.10 @48 = $98.1/4.9 = 20 shares; cap 15% = $1,471.5 - 20*48 = $511.5 -> 10 shares
+    assert "제안 2차 10주" in m
+    m = review._watch_verdict(w, 46.6, date(2026, 9, 9), ctx)
+    assert m.startswith("❌ NVO 2차 트랜치 소멸 확정") and "1차 20주" in m
+    m = review._watch_verdict(w, 48.0, date(2026, 9, 10), {**ctx, "rank": (9, 15)})
+    assert "상위 25% 조건 미충족" in m and "D+1" in m
+    m = review._watch_verdict(w, None, date(2026, 9, 9), ctx)
+    assert m.startswith("⚪")
+    w2 = {"ticker": "AMN", "market": "US", "type": "rank_check", "date": "2026-09-09", "top": 15, "note": "r"}
+    assert review._watch_verdict(w2, None, date(2026, 9, 8), {"rank": (12, 15)}) is None
+    assert review._watch_verdict(w2, None, date(2026, 9, 9), {"rank": (12, 15)}).startswith("✅ AMN 재랭킹 12/15")
+    assert review._watch_verdict(w2, None, date(2026, 9, 9), {"rank": (18, 20)}).startswith("❌ AMN 재랭킹 18/20")
+    assert "보류 종료 후보" in review._watch_verdict(w2, None, date(2026, 9, 9), {"rank": None})
+    print("  watch tranche2/rank_check: date gate, sizing, rank rule, expiry OK")
+
+
 def main() -> int:
     test_gates()
     test_paper_cohorts()
@@ -857,6 +883,7 @@ def main() -> int:
     test_paper_auto_exit_and_close_position()
     test_control_cohort_and_verdict_summary()
     test_compliance_summary()
+    test_watch_tranche2_and_rank_check()
     print("✅ test_recommend: all passed")
     return 0
 

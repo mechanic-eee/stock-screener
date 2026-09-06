@@ -37,3 +37,4 @@ exports/
 *.log
 
 top20.txt
+data/brief/

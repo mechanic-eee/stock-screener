@@ -188,17 +188,75 @@ def _verdict(h: dict, price, rank, distress, edgar_new, today: dt.date,
             "ret": ret, "vs_stop": vs_stop}
 
 
-def _watch_verdict(w: dict, price, today: dt.date):
+def _watch_verdict(w: dict, price, today: dt.date, ctx: dict | None = None):
     """(순수 함수 — 테스트 대상) 워치 항목 1건 판정.
 
     상방 트리거·재상정일은 손절과 달리 아무 코드도 감시하지 않던 갭(NVO $47.06
     재탈환, 브이티 8/12 재상정 등 — 사람 기억에만 존재)의 자동화. 반환:
     None(미발동) / 문자열(발동 메시지 — 항목을 watch에서 지울 때까지 매일 표시).
-    type: price_above | price_below | date."""
+    type: price_above | price_below | date | tranche2 | rank_check.
+
+    tranche2 (2026-09-06, "때 되면 알려줘"): 판정일(date) 이후 종가가 level(1차 진입가)
+    이상이고 랭킹이 상위 25% 안이면 R1% 사이징으로 2차 제안까지 계산해 보낸다. 미달이면
+    소멸 확정문. ctx = {"rank": (rk, n) | None, "account": float, "risk": %, "max_pos": %,
+    "block_new": bool}. rank_check: 판정일 이후 스냅샷 랭킹이 top 이내인지."""
     if not isinstance(w, dict):
         return f"⚠️ 워치 항목 형식 오류({w!r}) — 확인"
     t = w.get("type")
     label = w.get("note") or w.get("ticker", "?")
+    ctx = ctx or {}
+    if t in ("tranche2", "rank_check"):
+        try:
+            d = dt.date.fromisoformat(str(w.get("date")))
+        except (ValueError, TypeError):
+            return f"⚠️ 워치 날짜 형식 오류({w.get('ticker','?')}: {w.get('date')!r}) — 확인"
+        if today < d:
+            return None
+        tkr = w.get("ticker", "?")
+        rk = ctx.get("rank")
+        rk, n = (rk if isinstance(rk, (tuple, list)) and len(rk) >= 2 else (None, 0))
+        rank_txt = (f"랭킹 {rk}/{n}" if rk else ("유니버스 밖" if n else "랭킹 미확인"))
+        if t == "rank_check":
+            top = int(w.get("top") or 15)
+            if rk is None:
+                return f"🗓 {tkr} 재랭킹 확인 — {rank_txt} → 보류 종료 후보 ({label})"
+            if rk <= top:
+                return f"✅ {tkr} 재랭킹 {rk}/{n} — 상위 {top} 유지 → 페이퍼 채택 검토 대상 ({label})"
+            return f"❌ {tkr} 재랭킹 {rk}/{n} — 상위 {top} 밖 → 보류 종료 ({label})"
+        # tranche2
+        try:
+            lvl = float(w["level"])
+        except (KeyError, TypeError, ValueError):
+            return f"⚠️ 워치 level 미설정/형식 오류({tkr}) — 확인"
+        if price is None:
+            return f"⚪ {tkr} 2차 판정 불능(가격 없음) — 수동 확인"
+        tag = "D-DAY" if today == d else f"D+{(today - d).days}"
+        if price < lvl:
+            return (f"❌ {tkr} 2차 트랜치 소멸 확정 ({tag}) — 종가 {price:,.2f} < {lvl:,.2f}. "
+                    f"1차 {w.get('shares_1st', '?')}주·손절 {float(w.get('stop', 0)):,.2f} 유지. 워치 제거 요망")
+        rank_ok = bool(rk and n and rk <= n * 0.25)
+        if not rank_ok:
+            return (f"⚠️ {tkr} 2차 ({tag}) 가격 조건 충족({price:,.2f} ≥ {lvl:,.2f})이나 {rank_txt} — "
+                    f"상위 25% 조건 미충족 → 2차 취소(규칙). 1차 유지")
+        try:
+            import position_size as ps
+            stop = float(w.get("stop"))
+            acct = float(ctx.get("account") or 0)
+            r = ps.size_position(price, stop, acct, float(ctx.get("risk") or 1.0),
+                                 float(ctx.get("max_pos") or 15.0))
+            sh1 = int(w.get("shares_1st") or 0)
+            cap_left = max(0.0, acct * float(ctx.get("max_pos") or 15.0) / 100.0 - sh1 * price)
+            shares = min(int(r.get("shares") or 0), int(cap_left // price)) if r.get("ok") else 0
+            risk_amt = (price - stop) * shares
+            tot_pct = ((sh1 + shares) * price / acct * 100.0) if acct else 0.0
+            plan = (f"제안 2차 {shares}주 @≈{price:,.2f} · 손절 {stop:,.2f} 유지 · 추가 리스크 "
+                    f"${risk_amt:,.0f}({risk_amt / acct * 100 if acct else 0:.2f}%) · 합산 비중 {tot_pct:.1f}%"
+                    if shares > 0 else "제안 0주(최대비중 한도 소진 또는 사이징 불가) → 2차 없이 1차 유지")
+        except Exception as e:  # noqa: BLE001
+            plan = f"사이징 계산 실패({e}) — 수동 계산"
+        block = " ⛔ 계좌 히트 차단 중 — 실계좌 집행은 축소가 먼저(사용자 결정)" if ctx.get("block_new") else ""
+        return (f"✅ {tkr} 2차 트랜치 조건 충족 ({tag}): 종가 {price:,.2f} ≥ {lvl:,.2f} · {rank_txt}(상위 25% 내). "
+                f"{plan}.{block} 승인 시 '2차 N주 체결' 알려주면 기록")
     if t in ("price_above", "price_below"):
         # level 검증 — 결측·비숫자면 무장된 듯 보이나 영구 미발동(블라인드)이므로 표면화(감사 F8)
         if w.get("level") is None:
@@ -336,7 +394,10 @@ def _theme_concentration(rows: list[dict], themes: dict) -> list[tuple[bool, str
 def _run(holdings, themes, fx, today, args, watch=None) -> "bool | None":
     """본체 — main()의 try 안에서 호출(예외는 main이 폴백 핑으로 처리)."""
     watch = watch or []
-    ranks = None if args.no_rank else _rank_map(holdings)
+    # 랭킹은 보유 + 랭킹 조건 워치(tranche2·rank_check) 대상까지 한 번에 조회
+    rank_targets = holdings + [w for w in watch if isinstance(w, dict) and w.get("type") in ("tranche2", "rank_check")
+                               and w.get("ticker")]
+    ranks = None if args.no_rank else _rank_map(rank_targets)
     edgar_seen: dict[str, list] = {}
     if not args.no_edgar and _SEEN_PATH.exists():
         try:
@@ -429,7 +490,8 @@ def _run(holdings, themes, fx, today, args, watch=None) -> "bool | None":
         try:  # 항목별 격리 — 손상 워치 1건이 요약·하트비트를 죽이지 않게(감사 F2/F7)
             px = None
             fetch_failed = False
-            if isinstance(w, dict) and w.get("type") in ("price_above", "price_below"):
+            wctx = None
+            if isinstance(w, dict) and w.get("type") in ("price_above", "price_below", "tranche2"):
                 tkr = w.get("ticker")
                 px = price_by_tkr.get(tkr)
                 if px is None and tkr:
@@ -438,7 +500,14 @@ def _run(holdings, themes, fx, today, args, watch=None) -> "bool | None":
                     except Exception:  # noqa: BLE001
                         px = None
                     fetch_failed = px is None
-            msg = _watch_verdict(w, px, today)
+            if isinstance(w, dict) and w.get("type") in ("tranche2", "rank_check"):
+                mk = w.get("market", "US")
+                rk = ranks.get(w.get("ticker")) if ranks else None
+                wctx = {"rank": (rk[0], rk[1]) if rk else None,
+                        "account": _cfg.get("account_krw" if mk == "KR" else "account_usd"),
+                        "risk": _cfg.get("risk_pct", 1.0), "max_pos": _cfg.get("max_pos_pct", 15),
+                        "block_new": hstate.get("block_new")}
+            msg = _watch_verdict(w, px, today, wctx)
             if msg:
                 hits.append(msg)
             elif fetch_failed:
