@@ -74,6 +74,23 @@ Write-Host " - Deploy when the index is above its 200DMA (see the daily alert �
 # Journal history: stock-investing is a PRIVATE git repo (2026-09-06). Snapshot the day
 # (TRACKING/DECISIONS/CONTROL/planned_events/account_state) so nothing is lost to a bad
 # hand edit or a crash. Best-effort: never fails the task, never blocks on prompts.
+# Screener side: only the runtime state files churn daily (EDGAR seen sets, the
+# heartbeat). They are versioned too ("모든 정보 깃에", 2026-09-06) but committed
+# explicitly by path so nothing unexpected rides along on a public repo.
+$scr = Join-Path $PSScriptRoot ".."
+if (Test-Path (Join-Path $scr ".git")) {
+    try {
+        $state = @("data/edgar_seen.json", "data/review_edgar_seen.json", "data/last_heartbeat.json")
+        & git -C $scr add -- $state 2>&1 | Out-Null
+        $staged = & git -C $scr diff --cached --name-only
+        if ($staged) {
+            & git -C $scr -c commit.gpgsign=false commit -q -m ("state: daily run " + (Get-Date -Format "yyyy-MM-dd")) 2>&1 | Out-Null
+            & git -C $scr push -q origin main 2>&1 | Out-Host
+            Write-Host "screener state: committed + pushed"
+        }
+    } catch { Write-Host "screener state: git step failed - $_" }
+}
+
 $inv = Join-Path $PSScriptRoot "..\..\stock-investing"
 if (Test-Path (Join-Path $inv ".git")) {
     try {
