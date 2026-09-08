@@ -1,5 +1,7 @@
 # LOG — stock-screener
 
+## [2026-09-08] stock-screener | fix | 인시던트: 미 노동절 휴장 → 신선도 가드 오탐(ABORT) → 사이드카 9/4 동결 → 감시 경로 라이브 폴백(review 4h) → 30분 제한이 부모만 죽여 고아 python이 21시 텔레그램 발송 → 워치독 이틀 연속 경보. 수정 3건: ①신선도 기준을 벤치마크 최종 거래일로(휴장 상쇄) ②fundamentals/valuation OFFLINE + review._load_rows_offline (303s→6.8s) ③daily.ps1 시작 시 잔재 taskkill. 타임아웃 러너 3종 시도 후 폐기(음성결과: PassThru 5초 오판·ObjectEvent 데드락·null 무한폴링). 실측 전체 51s. → docs/인시던트-2026-09-08.md
+
 ## [2026-09-06] stock-screener | work | 개인 JSON 정본 이관: holdings·portfolio·realized_ledger·account_state → ../stock-investing/data/ (position_size.PORTFOLIO·review.HOLDINGS/_STATE_PATH·ledger.LEDGER 새 위치 우선, 옛 위치 폴백). daily.ps1 끝에 저널 자동 커밋·push. 문서 경로 갱신. 테스트·selftest·ledger·review 라이브 확인.
 
 ## [2026-09-06] stock-screener | feat | 선제 알림 장치: review 워치 tranche2(판정일 이후 종가≥level & 랭킹 상위25% → position_size로 2차 제안, 미달 소멸문)·rank_check(top N 유지 여부) + ctx(계좌·R·히트) / brief.py(자료팩 8종 → claude -p --allowedTools Read → reviews/ 저장 → 텔레그램, 실패도 통지, 계획이벤트 done) + brief.ps1 + register-brief-task.ps1(1회·WakeToRun). 9/12 09:00 paper8w 등록. holdings watch: NVO tranche2 9/9·AMN rank_check 9/9. 테스트 25.
