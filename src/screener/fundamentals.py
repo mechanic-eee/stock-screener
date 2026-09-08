@@ -117,6 +117,17 @@ def _kr_report_candidates(today: Optional[date] = None) -> list[tuple[int, str]]
 # app primes them here — get_fundamentals() then returns it without any fetch.
 _primed: dict[str, FundamentalsBundle] = {}
 
+# 오프라인 모드: True면 get_fundamentals가 네트워크를 절대 치지 않는다(프라임 사이드카와
+# 로컬 DB 캐시만; 없으면 available=False). 매일 도는 감시 스크립트(review/monitor)가
+# 랭킹을 조회할 때 사이드카에 없는 수백 종목을 라이브로 재조회해 실행이 5분~4시간까지
+# 늘어난 사고(2026-09-08)의 차단막. 주간 깔때기·스캔은 끄고 쓴다.
+OFFLINE = False
+
+
+def set_offline(flag: bool = True) -> None:
+    global OFFLINE
+    OFFLINE = bool(flag)
+
 
 def prime(mapping: dict[str, FundamentalsBundle]) -> None:
     """Seed the per-process fundamentals cache from a precomputed source (snapshot)."""
@@ -771,6 +782,8 @@ def get_fundamentals(market: str, ticker: str, use_cache: bool = True,
             if cached is not None:
                 return _signals_from_rows(cached, market)
 
+        if OFFLINE:
+            return FundamentalsBundle(available=False)   # 네트워크 금지(감시 경로)
         rows: list[dict] = []
         for attempt in range(max_retries):
             try:

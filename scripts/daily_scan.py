@@ -138,16 +138,40 @@ def main() -> int:
             return n
 
         today_utc = _dt.datetime.now(_dt.timezone.utc).date()
+
+        def _market_session(market: str):
+            """그 시장 벤치마크(^GSPC/KS11)의 마지막 봉 = '최종 거래일'.
+
+            달력만 보는 _biz_days_behind는 휴장일을 모른다: 2026-09-07 미국 노동절에
+            마지막 시세가 9/4(금)인 것이 정상인데 '2영업일 낡음'으로 판정해 스캔이
+            중단됐다(2026-09-08 인시던트). 벤치마크도 같은 피드라 휴일이 자동 상쇄된다.
+            None이면 판정 불가 → 달력 기준으로 폴백."""
+            try:
+                from screener import benchmark
+                s = benchmark.get_benchmark(market)
+                if s is not None and len(s):
+                    return s.index.max().date()
+            except Exception:  # noqa: BLE001
+                pass
+            return None
+
         for m in args.markets:
             dates = [c.prices.index.max() for c in cands
                      if c.market == m and c.prices is not None and not c.prices.empty]
             if not dates:
                 continue
             last = max(dates).date()
-            behind = _biz_days_behind(last, today_utc)
+            session = _market_session(m)
+            if session is not None:
+                behind = _biz_days_behind(last, session)   # 최종 거래일 기준(휴일 강건)
+                ref = f"최종 거래일 {session}"
+            else:
+                behind = _biz_days_behind(last, today_utc)
+                ref = f"달력 {today_utc} (벤치마크 조회 실패 — 휴장 판정 불가)"
+            print(f"freshness {m}: last {last} vs {ref} -> {behind} biz day(s)", flush=True)
             if behind > 1:
-                print(f"ABORT: {m} last price {last} is {behind} business days old — "
-                      "stale cache; refusing to publish (see --no-fresh-guard)", flush=True)
+                print(f"ABORT: {m} last price {last} is {behind} business days behind "
+                      f"({ref}) — stale cache; refusing to publish (see --no-fresh-guard)", flush=True)
                 return 1
             if behind == 1:
                 msg = f"{m} 시세 {last} (1영업일 낡음 — 휴장 또는 캐시 확인)"

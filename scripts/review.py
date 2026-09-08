@@ -286,6 +286,23 @@ def _watch_verdict(w: dict, price, today: dt.date, ctx: dict | None = None):
     return f"⚠️ 워치 type 미상({t!r}) — 확인"
 
 
+def _load_rows_offline(rec):
+    """랭킹용 스냅샷 로드 — **네트워크 펀더/밸류 조회 금지**.
+
+    사이드카(원격 스냅샷)와 로컬 DB 캐시만 본다. 2026-09-08: 사이드카가 갱신되지 않은
+    상태(CI 실패)에서 라이브 폴백이 종목마다 DART 13콜을 때려 review 1회가 4시간이 됐다.
+    감시 스크립트는 '오늘의 랭킹'이 없으면 랭킹 없이 도는 게 맞다(하트비트가 우선)."""
+    from screener import fundamentals as fmod, valuation as vmod
+
+    fmod.set_offline(True)
+    vmod.set_offline(True)
+    try:
+        return rec._load_rows(rec.twl.DEFAULT_SNAPSHOT, 50, 5)
+    finally:
+        fmod.set_offline(False)
+        vmod.set_offline(False)
+
+
 def _rank_map(holdings: list[dict]):
     """보유 종목의 현 스냅샷 enrichment 랭킹 {ticker: (rank|None, n, score|None)}.
     스냅샷 원격 로드 — 실패나 유니버스 밖(ETF·낙폭<50%)이면 (None,n,None). None=전체 미수행."""
@@ -293,7 +310,7 @@ def _rank_map(holdings: list[dict]):
         import recommend as rec
         from screener.cooldown import SCORE_KEY  # 엔진은 점수를 '점수' 키로 저장(finding 9)
 
-        rows, _ = rec._load_rows(rec.twl.DEFAULT_SNAPSHOT, 50, 5)
+        rows, _ = _load_rows_offline(rec)
         out = {}
         for mk in {h["market"] for h in holdings}:
             lst = [r for r in rows if r.get("market") == mk

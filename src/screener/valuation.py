@@ -142,6 +142,14 @@ def _us_valuation(ticker: str, last_price: Optional[float] = None) -> ValuationB
     return _us_valuation_info(ticker)
 
 
+OFFLINE = False
+
+
+def set_offline(flag: bool = True) -> None:
+    global OFFLINE
+    OFFLINE = bool(flag)
+
+
 def get_valuation(market: str, ticker: str, last_price: Optional[float] = None) -> ValuationBundle:
     """Valuation multiples for a ticker; available=False -> treat as neutral.
 
@@ -151,6 +159,8 @@ def get_valuation(market: str, ticker: str, last_price: Optional[float] = None) 
     cached = _primed.get(ticker)
     if cached is not None:
         return cached
+    if OFFLINE:
+        return ValuationBundle(available=False)   # 네트워크 금지(감시 경로, 2026-09-08)
     try:
         return _us_valuation(ticker, last_price) if market == "US" else _kr_valuation(ticker)
     except Exception as e:  # noqa: BLE001 — never kill the scan

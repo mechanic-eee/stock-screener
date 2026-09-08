@@ -288,7 +288,8 @@ def _rank_check(held: list[dict]) -> dict | None:
     try:
         import recommend as rec
 
-        rows, _ = rec._load_rows(rec.twl.DEFAULT_SNAPSHOT, 50, 5)
+        import review as rev
+        rows, _ = rev._load_rows_offline(rec)   # 네트워크 펀더 조회 금지(2026-09-08 인시던트)
         by_mkt: dict[str, list[str]] = {}
         for mk in {r["market"] for r in held}:
             by_mkt[mk] = [r["ticker"] for r in rows if r.get("market") == mk
