@@ -31,32 +31,17 @@ if (-not (Test-Path $py)) { $py = "python" }
 # (audit finding 12: swallowed failures made 'Last Run Result' always success).
 $fail = 0
 
-# Run one python step with a HARD timeout, killing the whole process tree on
-# overrun. 2026-09-08 incident: review took 4h (stale sidecar -> live DART calls),
-# Task Scheduler killed the parent pwsh at its 30-min limit but the python child
-# survived as an orphan and pushed Telegram messages at 21:00. A step that cannot
-# finish in time must die loudly instead of haunting the evening.
-function Invoke-Step {
-    param([string]$Title, [string[]]$Args, [int]$TimeoutSec = 600)
-    Write-Host "`n=== $Title ===" -ForegroundColor Cyan
-    $outFile = [System.IO.Path]::GetTempFileName()
-    $p = Start-Process -FilePath $py -ArgumentList $Args -NoNewWindow -PassThru `
-        -RedirectStandardOutput $outFile -RedirectStandardError "$outFile.err"
-    if (-not $p.WaitForExit($TimeoutSec * 1000)) {
-        Write-Host "TIMEOUT after ${TimeoutSec}s - killing process tree (pid $($p.Id))" -ForegroundColor Red
-        & taskkill /PID $p.Id /T /F 2>&1 | Out-Host
-        try { $p.WaitForExit(10000) | Out-Null } catch {}
-        Get-Content $outFile -Tail 40 -ErrorAction SilentlyContinue | Out-Host
-        Remove-Item $outFile, "$outFile.err" -Force -ErrorAction SilentlyContinue
-        return 124
-    }
-    Get-Content $outFile -ErrorAction SilentlyContinue | Out-Host
-    $errTxt = Get-Content "$outFile.err" -ErrorAction SilentlyContinue
-    if ($errTxt) { $errTxt | Out-Host }
-    $code = $p.ExitCode
-    Remove-Item $outFile, "$outFile.err" -Force -ErrorAction SilentlyContinue
-    return $code
+# Kill leftovers from a previous run before starting. 2026-09-08 incident: a step
+# ran 4h (stale sidecar -> live DART calls), Task Scheduler killed the parent pwsh
+# at its ExecutionTimeLimit but the python child survived as an orphan and pushed
+# Telegram messages at 21:00. Orphans also fight over the SQLite cache.
+$mine = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*stock-screener*scripts*" }
+foreach ($o in $mine) {
+    Write-Host "cleanup: killing leftover python pid $($o.ProcessId)" -ForegroundColor Yellow
+    & taskkill /PID $o.ProcessId /T /F 2>&1 | Out-Null
 }
+
 
 # Native exe stdout bypasses Start-Transcript unless routed through the host —
 # the log had empty TRACK/MONITOR sections until 2026-07-19 (audit finding).
@@ -64,21 +49,22 @@ function Invoke-Step {
 # REVIEW runs FIRST: it is the only daily heartbeat (writes data/last_heartbeat.json
 # after a successful send), so it must not sit behind track+monitor inside the
 # 30-minute ExecutionTimeLimit (observed 11-15 min total).
+Write-Host "=== REVIEW (personal holdings: discipline dashboard) ===" -ForegroundColor Cyan
 $rev = @((Join-Path $PSScriptRoot "review.py"))
 if ($Telegram) { $rev += "--telegram" }
-$rc = Invoke-Step -Title "REVIEW (personal holdings: discipline dashboard)" -Args $rev -TimeoutSec 600
-if ($rc -ne 0) { $fail = 1 }
+& $py $rev 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { $fail = 1 }
 
-$rc = Invoke-Step -Title "TRACK (seeds / positions: return, days, stop distance)" `
-    -Args @((Join-Path $PSScriptRoot "track.py")) -TimeoutSec 600
-if ($rc -ne 0) { $fail = 1 }
+Write-Host "`n=== TRACK (seeds / positions: return, days, stop distance) ===" -ForegroundColor Cyan
+& $py (Join-Path $PSScriptRoot "track.py") 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { $fail = 1 }
 
+Write-Host "`n=== MONITOR (system positions: stop breach / distress / weekly report) ===" -ForegroundColor Cyan
 $mon = @((Join-Path $PSScriptRoot "monitor.py"))
 # review.py provides the daily heartbeat; keep monitor's alerts + Monday weekly report
 if ($Telegram) { $mon += "--telegram"; $mon += "--no-heartbeat" }
-$rc = Invoke-Step -Title "MONITOR (system positions: stop breach / distress / weekly report)" `
-    -Args $mon -TimeoutSec 900
-if ($rc -ne 0) { $fail = 1 }
+& $py $mon 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { $fail = 1 }
 
 Write-Host "`n=== REMINDER ===" -ForegroundColor Yellow
 Write-Host " - Curate WATCHLIST 보류 rows (fill thesis/stop/catalyst, set 관심)."
