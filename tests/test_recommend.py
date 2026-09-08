@@ -535,11 +535,16 @@ def test_price_freshness_by_bar_date():
     import track
     from screener.data import prices as prices_mod
 
-    calls = {}
+    calls = []
+    fresh_bars = {}          # ticker -> extra bar returned only on a forced refetch
     def fake_get_prices(market, ticker, years=1, max_age_days=1.0, **kw):
-        calls["max_age"] = max_age_days
+        calls.append(max_age_days)
         if ticker == "EMPTY":
             return pd.DataFrame()
+        forced = (max_age_days == 0.0) or (kw.get("use_cache") is False)
+        if forced and ticker in fresh_bars:
+            idx = pd.to_datetime(["2026-08-28", "2026-09-01", fresh_bars[ticker]])
+            return pd.DataFrame({"close": [10.0, 11.0, 12.0]}, index=idx)
         idx = pd.to_datetime(["2026-08-28", "2026-09-01"])
         return pd.DataFrame({"close": [10.0, 11.0]}, index=idx)
     orig = prices_mod.get_prices
@@ -556,8 +561,21 @@ def test_price_freshness_by_bar_date():
         # empty frame -> explicit fetch failure
         assert track._current_quote("US", "EMPTY", ref_date=date(2026, 9, 4)) == (None, None, "가격조회 실패")
         # single cache max-age for every consumer (<1.0 so 08:10 never reuses yesterday)
-        track._current_price("US", "X")
-        assert calls["max_age"] == track.PRICE_MAX_AGE_DAYS < 1.0
+        calls.clear()
+        track._current_price("US", "X", )
+        assert calls[0] == track.PRICE_MAX_AGE_DAYS < 1.0
+
+        # 2026-09-09: a cached bar behind the market session triggers ONE forced
+        # refetch before judging (12h cache served a 2-day-old close after the bell).
+        calls.clear()
+        fresh_bars["Y"] = "2026-09-04"
+        px, bar, why = track._current_quote("US", "Y", ref_date=date(2026, 9, 4))
+        assert px == 12.0 and bar == date(2026, 9, 4) and why is None, (px, bar, why)
+        assert 0.0 in calls, calls          # the forced refetch happened
+        # refetch that brings nothing newer -> still judged stale, no infinite retry
+        calls.clear()
+        px, bar, why = track._current_quote("US", "X", ref_date=date(2026, 9, 4))
+        assert px is None and "시세 정지" in why and calls.count(0.0) == 1, calls
     finally:
         prices_mod.get_prices = orig
 
