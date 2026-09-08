@@ -225,8 +225,14 @@ def _market_last_date(market: str) -> "date | None":
         sym = getattr(benchmark, "_BENCH", {}).get(market)
         if sym:
             df = prices_mod.get_prices(market, sym, years=1, max_age_days=PRICE_MAX_AGE_DAYS)
-            if df is not None and not df.empty:
-                out = _bar_date(df.index.max())
+            out = _bar_date(df.index.max()) if (df is not None and not df.empty) else None
+            # 캐시가 12시간까지 유효해서 '장 마감 후 첫 실행'이 어제(또는 그제) 봉을 그대로
+            # 돌려주던 갭(2026-09-09: NVO 9/8 종가 $45.16이 있는데 9/4 $46.60으로 판정될 뻔).
+            # 기준 시계열이 달력상 1영업일 넘게 뒤지면 한 번만 강제 재조회한다.
+            if out is not None and biz_days_behind(out, date.today()) > 1:
+                fresh = prices_mod.get_prices(market, sym, years=1, max_age_days=0.0, use_cache=False)
+                if fresh is not None and not fresh.empty:
+                    out = max(out, _bar_date(fresh.index.max()) or out)
     except Exception:  # noqa: BLE001
         out = None
     _market_last[market] = out
@@ -245,8 +251,16 @@ def _current_quote(market: str, ticker: str, max_age_days: float = PRICE_MAX_AGE
     if df is None or df.empty:
         return None, None, "가격조회 실패"
     bar = _bar_date(df.index.max())
-    price = float(df["close"].iloc[-1])
     ref = ref_date or _market_last_date(market) or date.today()
+    # 캐시된 봉이 시장 최종 거래일보다 뒤지면 '정지'로 단정하기 전에 한 번 재조회한다.
+    # 12시간 캐시가 장 마감 직후 실행에서 옛 종가를 그대로 주는 경우가 있다(2026-09-09).
+    if bar is not None and ref is not None and bar < ref:
+        fresh = prices_mod.get_prices(market, ticker, years=1, max_age_days=0.0, use_cache=False)
+        if fresh is not None and not fresh.empty:
+            fbar = _bar_date(fresh.index.max())
+            if fbar is not None and (bar is None or fbar > bar):
+                df, bar = fresh, fbar
+    price = float(df["close"].iloc[-1])
     if bar is not None:
         behind = biz_days_behind(bar, ref)
         if behind > PRICE_STALE_BIZ_DAYS:
