@@ -1,0 +1,42 @@
+{
+  "last_run_utc": "2026-09-19T00:42:22+00:00",
+  "markets": [
+    "KR",
+    "US"
+  ],
+  "base_survivors": 1575,
+  "snapshot_tickers": 1575,
+  "market_survivors": {
+    "KR": 394,
+    "US": 1181
+  },
+  "ohlc_inconsistent": {
+    "KR": 0.0081,
+    "US": 0.0003
+  },
+  "last_price_date": "2026-09-18",
+  "fundamentals_available": 0.976,
+  "valuations_available": 0.997,
+  "signal_fill": {
+    "f_score": 0.931,
+    "altman_z": 0.934,
+    "accrual_ratio": 0.962,
+    "gross_profitability": 0.827
+  },
+  "fundamentals_asof": {
+    "KR": {
+      "median": "2026-06-30",
+      "latest": "2026-06-30",
+      "n": 391,
+      "stale_share": 0.003,
+      "expected": "2026-06-30"
+    },
+    "US": {
+      "median": "2026-06-30",
+      "latest": "2026-08-31",
+      "n": 1047,
+      "stale_share": 0.055,
+      "expected": "2026-06-30"
+    }
+  }
+}
