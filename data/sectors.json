@@ -35,6 +35,16 @@
   "LXU": "Basic Materials",
   "TBLA": "Communication Services",
   "YALA": "Technology",
-  "DV": "Communication Services"
+  "DV": "Communication Services",
+  "PDD": "Consumer Cyclical",
+  "VIR": "Healthcare",
+  "CRCT": "Technology",
+  "PODD": "Healthcare",
+  "SLP": "Healthcare",
+  "ZD": "Communication Services",
+  "YETI": "Consumer Cyclical",
+  "SITE": "Industrials",
+  "VET": "Energy",
+  "CAL": "Consumer Cyclical"
  }
 }
