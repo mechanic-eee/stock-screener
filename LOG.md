@@ -1,5 +1,7 @@
 # LOG — stock-screener
 
+## [2026-09-24] stock-screener | fix | 일일 점검 **08:10→21:00, 워치독 20:00→23:30** 이동(사용자 결정). 근거 실측: WakeToRun+RTCWAKE(AC/DC) 모두 Modern Standby에서 0일 작동, 실행은 PC가 깨어 있던 날뿐(9/22 08:11 정시·9/23 22:24 캐치업·9/24 08:49 시작 후 267014 종료·9/10~21 워치독조차 미발동). 21:00=KR 마감 후·US 개장 전(부분봉 없음), PC 저녁 사용 패턴과 일치. 변경: register-daily/watchdog 기본값·설명, `review._run_label` 정규 창 07~09→20~22시(+테스트), 문서 7곳. 재등록 후 daily.ps1 -Telegram 실전 실행 ✅(하트비트 22:37). 부수 교훈: '15일 미실행' 진단은 기억 기반 오류 — 상태 주장은 스케줄러 LastRun·하트비트·워치독 로그 3센서 대조 후(handoff 노트).
+
 ## [2026-09-08] stock-screener | fix | 인시던트: 미 노동절 휴장 → 신선도 가드 오탐(ABORT) → 사이드카 9/4 동결 → 감시 경로 라이브 폴백(review 4h) → 30분 제한이 부모만 죽여 고아 python이 21시 텔레그램 발송 → 워치독 이틀 연속 경보. 수정 3건: ①신선도 기준을 벤치마크 최종 거래일로(휴장 상쇄) ②fundamentals/valuation OFFLINE + review._load_rows_offline (303s→6.8s) ③daily.ps1 시작 시 잔재 taskkill. 타임아웃 러너 3종 시도 후 폐기(음성결과: PassThru 5초 오판·ObjectEvent 데드락·null 무한폴링). 실측 전체 51s. → docs/인시던트-2026-09-08.md
 
 ## [2026-09-06] stock-screener | work | 개인 JSON 정본 이관: holdings·portfolio·realized_ledger·account_state → ../stock-investing/data/ (position_size.PORTFOLIO·review.HOLDINGS/_STATE_PATH·ledger.LEDGER 새 위치 우선, 옛 위치 폴백). daily.ps1 끝에 저널 자동 커밋·push. 문서 경로 갱신. 테스트·selftest·ledger·review 라이브 확인.
