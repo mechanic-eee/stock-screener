@@ -7,7 +7,7 @@ off_lows t-5.5). 대신 **내가 이미 정해둔 규칙이 오늘 걸렸는지*
 추가*만 알리며, 청산검토(🔴) 플래그가 있으면 **억제**한다(물타기 방지).
 
   python scripts/review.py                 # 콘솔 대시보드
-  python scripts/review.py --telegram      # 요약을 텔레그램으로 (daily.ps1 08:10)
+  python scripts/review.py --telegram      # 요약을 텔레그램으로 (daily.ps1 21:00, 2026-09-24까지 08:10)
   python scripts/review.py --no-rank       # 스냅샷 랭킹 조회 생략(빠름)
 
 데이터: ../stock-investing/data/holdings.json (비공개 저장소 정본; 옛 data/holdings.json 폴백). monitor/track 헬퍼 재사용.
@@ -94,10 +94,10 @@ def _send_heartbeat(text: str, kind: str = "review") -> bool:
 
 
 def _run_label(today: dt.date, now: "dt.datetime | None" = None) -> str:
-    """'2026-09-05 08:10' — 정규 시각(07~09시) 밖이면 '(catch-up)'을 붙여 13:00 재가동이나
-    새벽 catch-up 실행이 08:10 정규 실행과 똑같이 읽히지 않게 한다."""
+    """'2026-09-05 08:10' — 정규 시각(20~22시, 2026-09-24부터 — 이전 07~09시) 밖이면 '(catch-up)'을 붙여
+    다음날 아침 재가동 같은 catch-up 실행이 21:00 정규 실행과 똑같이 읽히지 않게 한다."""
     now = now or dt.datetime.now()
-    tag = "" if 7 <= now.hour <= 9 else " · catch-up"
+    tag = "" if 20 <= now.hour <= 22 else " · catch-up"
     return f"{today.isoformat()} {now:%H:%M}{tag}"
 
 

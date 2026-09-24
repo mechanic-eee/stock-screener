@@ -12,7 +12,7 @@
 # ASCII-only on purpose (no UTF-8 BOM needed).
 param(
     [switch]$Unregister,
-    [string]$Time = "08:10"   # after the 07:00 KST telegram alert
+    [string]$Time = "21:00"   # 2026-09-24: moved from 08:10 (see note below)
 )
 
 $TaskName = "StockScreener-DailyReview"
@@ -40,6 +40,10 @@ $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesd
 # -WakeToRun: 4 of 20 weekdays (8/10~9/4) had no 08:10 run because the PC was
 # asleep; catch-up then fired at 01:10 the next day. Wake works from sleep
 # (not from shutdown) - the external HEALTHCHECK_URL ping covers the rest.
+# 2026-09-24: WakeToRun + RTCWAKE never woke this Modern Standby laptop (0 of 10
+# weekdays 9/10~9/23); runs happened only when the PC was already awake. Moved
+# to 21:00 KST = PC-in-use hours, KR closed (15:30) and US pre-open (22:30), so
+# no partial bars either way. Watchdog moved to 23:30 accordingly.
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
     -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 

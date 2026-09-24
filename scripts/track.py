@@ -178,7 +178,7 @@ def _merge_tranches(rows: list[dict]) -> dict:
     return base
 
 
-# 시세 캐시 수명(일). 08:10 고정 실행이 전날 캐시를 재사용하지 않도록 <1.0(감사 finding 11).
+# 시세 캐시 수명(일). 고정 시각 실행(21:00, 구 08:10)이 전날 캐시를 재사용하지 않도록 <1.0(감사 finding 11).
 # track/monitor/review가 전부 이 값을 쓴다 — 스크립트마다 달라 같은 런에서 SIRI가
 # $28.46/$29.12로 갈리던 비결정성 제거(시스템-평가 2026-09-05 P0-2).
 PRICE_MAX_AGE_DAYS = 0.5

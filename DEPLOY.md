@@ -90,7 +90,7 @@ git push -u origin main
 ## (선택) 보유종목 감시 자동화 — 로컬 스케줄러
 포지션(DECISIONS.md)은 로컬 전용이라 Actions로 감시할 수 없다. 대신:
 ```powershell
-pwsh scripts/register-daily-task.ps1        # 평일 08:10, track+monitor(-Telegram) 자동 실행
+pwsh scripts/register-daily-task.ps1        # 평일 21:00, track+monitor(-Telegram) 자동 실행
 pwsh scripts/register-daily-task.ps1 -Unregister   # 해제
 ```
 노트북이 꺼져 있던 시간대면 **깨어난 직후 따라잡아 실행**(StartWhenAvailable)되고, 로그는

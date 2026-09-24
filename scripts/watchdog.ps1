@@ -1,4 +1,5 @@
-# Watchdog for the 08:10 daily review task. Runs weekday evenings (20:00) and
+# Watchdog for the 21:00 daily review task (08:10 until 2026-09-24). Runs weekday
+# nights (23:30; 20:00 before 2026-09-24) and
 # alerts Telegram if the most recent due weekday's daily.ps1 left no trace in
 # monitor-log.txt.
 #
@@ -41,7 +42,7 @@ function Write-SelfLog([string]$state) {
 }
 
 # Which day's run must exist? Evening run (>=12:00) verifies today; a pre-noon
-# catch-up verifies yesterday (today's 08:10 may not be due yet). Weekend
+# catch-up verifies yesterday (today's 21:00 may not be due yet). Weekend
 # targets roll back to Friday instead of skipping (a Sat catch-up must still
 # verify Friday).
 $now = Get-Date

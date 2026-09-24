@@ -1,5 +1,5 @@
 # Register (or remove) the evening watchdog task — the INDEPENDENT second
-# failure domain for the 08:10 daily review (postmortem 2026-08-07).
+# failure domain for the 21:00 daily review (08:10 until 2026-09-24) (postmortem 2026-08-07).
 # Uses the always-present System32 powershell.exe by absolute path so a pwsh
 # auto-update can never kill BOTH tasks the same way.
 #
@@ -7,7 +7,7 @@
 #   powershell scripts/register-watchdog-task.ps1 -Unregister  # remove
 param(
     [switch]$Unregister,
-    [string]$Time = "20:00"
+    [string]$Time = "23:30"   # 2026-09-24: 20:00 -> 23:30, after the 21:00 review
 )
 
 $TaskName = "StockScreener-Watchdog"
@@ -31,5 +31,5 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
     -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-    -Settings $settings -Description "Alerts Telegram if the 08:10 daily review left no trace today" -Force | Out-Null
+    -Settings $settings -Description "Alerts Telegram if the 21:00 daily review left no trace today" -Force | Out-Null
 Write-Host "registered: $TaskName (weekdays $Time, System32 powershell, catch-up on wake)"

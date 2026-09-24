@@ -36,7 +36,7 @@ scripts/
   track.py             시드/포지션 사후 추적 (점수 실효성)
   monitor.py           보유종목 손절이탈·DART위험공시 감시
   review.py            개인 보유 규율 대시보드 (holdings.json → 규칙 판정, 서비스정의서: docs/규율-대시보드-서비스정의서.md)
-  daily.ps1            일일 리뷰 원클릭 (track+monitor+review, 평일 08:10 예약)
+  daily.ps1            일일 리뷰 원클릭 (track+monitor+review, 평일 21:00 예약)
   selftest.py          검증된 가중치·파이프라인 회귀가드
 backtest/
   composite_decile_backtest.py  점수 검증 (production 필터를 PIT 슬라이스에 호출)
@@ -68,7 +68,7 @@ copy .env.example .env   # DART_API_KEY / NewsAPI / 텔레그램 (선택)
 python -m streamlit run app.py            # 대시보드
 python scripts/selftest.py                # 검증된 설정·파이프라인 점검 (~1s)
 pwsh scripts/daily.ps1                    # 일일 리뷰 (track + monitor)
-pwsh scripts/register-daily-task.ps1      # 평일 08:10 자동 리뷰 등록 (감시 자동화)
+pwsh scripts/register-daily-task.ps1      # 평일 21:00 자동 리뷰 등록 (감시 자동화)
 
 # 점수 검증 재현 (시세·EDGAR/DART 캐시 필요)
 python backtest/composite_decile_backtest.py --market KR --fundamentals dart

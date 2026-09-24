@@ -612,8 +612,8 @@ def test_heartbeat_only_after_send():
     finally:
         review._HEARTBEAT_PATH, review._send = orig_path, orig_send
 
-    lab = review._run_label(date(2026, 9, 7), dt.datetime(2026, 9, 7, 8, 10))
-    assert lab == "2026-09-07 08:10"
+    lab = review._run_label(date(2026, 9, 7), dt.datetime(2026, 9, 7, 21, 5))
+    assert lab == "2026-09-07 21:05"
     lab = review._run_label(date(2026, 9, 7), dt.datetime(2026, 9, 7, 13, 2))
     assert lab.endswith("catch-up")
     print("  heartbeat: written only after send / catch-up label OK")
